@@ -1,0 +1,16 @@
+.deps/
+.venv/
+.pytest_tmp/
+.pytest-*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tools/
+.uv_cache/
+__pycache__/
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
+*.log
+prototype/.shots/

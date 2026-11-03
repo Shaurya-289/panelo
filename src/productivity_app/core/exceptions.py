@@ -27,16 +27,8 @@ class DuplicateNameError(ConflictError):
     code = "duplicate_name"
 
 
-class ActiveTimerConflictError(ConflictError):
-    code = "active_timer_conflict"
-
-
 class InvalidStateTransitionError(AppError):
     code = "invalid_state_transition"
-
-
-class FolderCycleError(ConflictError):
-    code = "folder_cycle"
 
 
 class DatabaseError(AppError):

@@ -19,8 +19,6 @@ from productivity_app.core.exceptions import (
     ValidationError,
 )
 from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.schemas.folders import CreateFolder
-from productivity_app.schemas.tags import CreateTag
 from productivity_app.schemas.tasks import (
     CreateTask,
     TaskCalendarQuery,
@@ -39,8 +37,6 @@ _TASK_EVENT_TYPES = (
     "TASK_COMPLETED",
     "TASK_CANCELLED",
     "TASK_REOPENED",
-    "TASK_MOVED",
-    "TASK_TAGS_CHANGED",
     "TASK_DELETED",
     "TASK_RESTORED",
 )
@@ -182,126 +178,6 @@ def test_concurrent_task_mutations_are_serializable(application, kind) -> None:
         assert final.cancelled_at_utc is not None and final.completed_at_utc is None
 
 
-def test_folder_and_tag_races_leave_only_valid_visible_relationships(application) -> None:
-    folder = application.folders.create_folder(CreateFolder(name="Race folder"))
-    create_barrier = Barrier(2)
-
-    def create():
-        create_barrier.wait()
-        try:
-            return application.tasks.create_task(CreateTask(title="race create", folder_id=folder.id))
-        except NotFoundError:
-            return None
-
-    def delete_folder():
-        create_barrier.wait()
-        return application.folders.delete_folder(folder.id, folder.version)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        created, _ = list(executor.map(lambda fn: fn(), (create, delete_folder)))
-    with application.engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT count(*) FROM tasks t JOIN folders f ON f.id=t.folder_id WHERE t.deleted_at_utc IS NULL AND f.deleted_at_utc IS NOT NULL")
-        ).scalar_one() == 0
-    tag = application.tags.create_tag(CreateTag(name="Race tag"))
-    task = application.tasks.create_task(CreateTask(title="tag race"))
-    tag_barrier = Barrier(2)
-
-    def assign():
-        tag_barrier.wait()
-        try:
-            return application.tasks.set_task_tags(task.id, (tag.id,), task.version)
-        except (StaleVersionError, NotFoundError):
-            return None
-
-    def delete_tag():
-        tag_barrier.wait()
-        return application.tags.delete_tag(tag.id, tag.version)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        list(executor.map(lambda fn: fn(), (assign, delete_tag)))
-    assert tag.id not in application.tasks.get_task(task.id).tag_ids
-    restored = application.tags.restore_tag(tag.id, application.tags.get_tag(tag.id, include_deleted=True).version)
-    assert restored.deleted_at_utc is None
-    # If assignment won before deletion, restoration reveals its retained association.
-    if application.tasks.get_task(task.id, include_deleted=True).version > task.version:
-        assert tag.id in application.tasks.get_task(task.id).tag_ids
-    if created is not None:
-        assert application.tasks.get_task(created.id).folder_id is None
-
-
-@pytest.mark.parametrize("operation", ["move", "restore"])
-def test_move_or_restore_racing_folder_delete_never_leaves_invalid_reference(application, operation) -> None:
-    folder = application.folders.create_folder(CreateFolder(name=f"{operation} folder"))
-    task = application.tasks.create_task(
-        CreateTask(title=operation, folder_id=folder.id if operation == "restore" else None)
-    )
-    if operation == "restore":
-        task = application.tasks.delete_task(task.id, task.version)
-    barrier = Barrier(2)
-
-    def task_operation():
-        version = application.tasks.get_task(task.id, include_deleted=True).version
-        barrier.wait()
-        try:
-            if operation == "move":
-                return application.tasks.move_task(task.id, folder.id, version)
-            return application.tasks.restore_task(task.id, version)
-        except (NotFoundError, StaleVersionError, ValidationError):
-            return None
-
-    def delete_folder():
-        version = application.folders.get_folder(folder.id).version
-        barrier.wait()
-        try:
-            return application.folders.delete_folder(folder.id, version)
-        except StaleVersionError:
-            return None
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        list(executor.map(lambda fn: fn(), (task_operation, delete_folder)))
-    with application.engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT count(*) FROM tasks t JOIN folders f ON f.id=t.folder_id WHERE t.deleted_at_utc IS NULL AND f.deleted_at_utc IS NOT NULL")
-        ).scalar_one() == 0
-
-
-def test_folder_deletion_relocates_all_task_states_without_task_events(application, clock) -> None:
-    parent = application.folders.create_folder(CreateFolder(name="Parent"))
-    child = application.folders.create_folder(CreateFolder(name="Child", parent_id=parent.id))
-    tag = application.tags.create_tag(CreateTag(name="Keep"))
-    todo = application.tasks.create_task(CreateTask(title="todo", folder_id=parent.id, tag_ids=(tag.id,)))
-    completed_seed = application.tasks.create_task(CreateTask(title="done", folder_id=parent.id))
-    completed = application.tasks.complete_task(completed_seed.id, completed_seed.version)
-    cancelled_seed = application.tasks.create_task(CreateTask(title="cancelled", folder_id=parent.id))
-    cancelled = application.tasks.cancel_task(cancelled_seed.id, cancelled_seed.version)
-    deleted_seed = application.tasks.create_task(CreateTask(title="deleted", folder_id=parent.id))
-    deleted = application.tasks.delete_task(deleted_seed.id, deleted_seed.version)
-    nested = application.tasks.create_task(CreateTask(title="nested", folder_id=child.id))
-    before = {item.id: item for item in (todo, completed, cancelled, deleted)}
-    moved_events = _task_events(application, "TASK_MOVED")
-    folder_events = _task_events(application, "FOLDER_DELETED")
-    application.folders.delete_folder(parent.id, parent.version)
-    assert application.tasks.get_task(nested.id).folder_id == child.id
-    for task_id, prior in before.items():
-        current = application.tasks.get_task(task_id, include_deleted=True)
-        assert current.folder_id is None and current.version == prior.version + 1
-        assert current.updated_at_utc == clock.now
-        assert (current.status, current.priority, current.start_at_utc, current.due_at_utc) == (
-            prior.status,
-            prior.priority,
-            prior.start_at_utc,
-            prior.due_at_utc,
-        )
-        assert (current.completed_at_utc, current.cancelled_at_utc, current.deleted_at_utc) == (
-            prior.completed_at_utc,
-            prior.cancelled_at_utc,
-            prior.deleted_at_utc,
-        )
-    assert application.tasks.get_task(todo.id).tag_ids == (tag.id,)
-    assert moved_events == [] and len(folder_events) == 1
-
-
 def test_views_filters_sorts_pagination_and_search_boundaries(application, clock) -> None:
     now = clock.now
     high = application.tasks.create_task(CreateTask(title="Exact 100%_\\", priority="HIGH", due_at_utc=now + timedelta(hours=2)))
@@ -339,14 +215,11 @@ def test_views_filters_sorts_pagination_and_search_boundaries(application, clock
 
 
 def test_task_events_cover_every_direct_workflow_and_subscriber_failure(application, clock) -> None:
-    folder = application.folders.create_folder(CreateFolder(name="Event folder"))
-    tag = application.tags.create_tag(CreateTag(name="Event tag"))
     observed: list = []
     bus = _bus(application)
     event_types = (
         "TASK_CREATED", "TASK_UPDATED", "TASK_STARTED", "TASK_RETURNED_TO_TODO",
-        "TASK_COMPLETED", "TASK_CANCELLED", "TASK_REOPENED", "TASK_MOVED",
-        "TASK_TAGS_CHANGED", "TASK_DELETED", "TASK_RESTORED",
+        "TASK_COMPLETED", "TASK_CANCELLED", "TASK_REOPENED", "TASK_DELETED", "TASK_RESTORED",
     )
     for event_type in event_types:
         bus.subscribe(event_type, observed.append)
@@ -359,14 +232,12 @@ def test_task_events_cover_every_direct_workflow_and_subscriber_failure(applicat
     task = application.tasks.reopen_task(task.id, task.version)
     task = application.tasks.cancel_task(task.id, task.version)
     task = application.tasks.reopen_task(task.id, task.version)
-    task = application.tasks.move_task(task.id, folder.id, task.version)
-    task = application.tasks.set_task_tags(task.id, (tag.id,), task.version)
     task = application.tasks.delete_task(task.id, task.version)
     task = application.tasks.restore_task(task.id, task.version)
     assert [event.event_type for event in observed] == [
         "TASK_CREATED", "TASK_UPDATED", "TASK_STARTED", "TASK_RETURNED_TO_TODO",
-        "TASK_COMPLETED", "TASK_REOPENED", "TASK_CANCELLED", "TASK_REOPENED", "TASK_MOVED",
-        "TASK_TAGS_CHANGED", "TASK_DELETED", "TASK_RESTORED",
+        "TASK_COMPLETED", "TASK_REOPENED", "TASK_CANCELLED", "TASK_REOPENED", "TASK_DELETED",
+        "TASK_RESTORED",
     ]
     assert all(event.entity_id == task.id and event.occurred_at_utc == clock.now for event in observed)
     assert all(event.payload == {} and "secret" not in str(event.payload) for event in observed)
@@ -381,17 +252,15 @@ def test_task_events_cover_every_direct_workflow_and_subscriber_failure(applicat
 
 def test_calendar_filters_and_all_sorts_are_stable(application, clock) -> None:
     clock.now = datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
-    folder = application.folders.create_folder(CreateFolder(name="Filter folder"))
-    tag = application.tags.create_tag(CreateTag(name="Filter tag"))
     first = application.tasks.create_task(
-        CreateTask(title="alpha", folder_id=folder.id, tag_ids=(tag.id,), priority="LOW", start_at_utc=clock.now, due_at_utc=clock.now + timedelta(hours=1))
+        CreateTask(title="alpha", priority="LOW", start_at_utc=clock.now, due_at_utc=clock.now + timedelta(hours=1))
     )
     second = application.tasks.create_task(
         CreateTask(title="beta", priority="URGENT", due_at_utc=clock.now + timedelta(days=8))
     )
     completed_seed = application.tasks.create_task(CreateTask(title="complete", due_at_utc=clock.now))
     completed = application.tasks.complete_task(completed_seed.id, completed_seed.version)
-    assert [row.id for row in application.tasks.list_tasks(TaskQuery(statuses=("TODO",), folder_id=folder.id, tag_id=tag.id))] == [first.id]
+    assert [row.id for row in application.tasks.list_tasks(TaskQuery(statuses=("TODO",), priorities=("LOW",)))] == [first.id]
     assert [row.id for row in application.tasks.list_tasks(TaskQuery(priorities=("URGENT",)))] == [second.id]
     assert [row.id for row in application.tasks.list_tasks(TaskQuery(completed_from_utc=clock.now - timedelta(microseconds=1), completed_before_utc=clock.now + timedelta(microseconds=1)))] == [completed.id]
     assert first.id in {row.id for row in application.tasks.list_today(TaskCalendarQuery(timezone="America/New_York"))}
@@ -417,7 +286,7 @@ def test_normalization_and_task_integrity_translation_boundaries() -> None:
         TaskSearchQuery(query=" " * 201)
     known_check = IntegrityError("", {}, RuntimeError("CHECK constraint failed: ck_tasks_status_values"))
     known_fk = IntegrityError("", {}, RuntimeError("FOREIGN KEY constraint failed"))
-    known_unique = IntegrityError("", {}, RuntimeError("UNIQUE constraint failed: task_tags.task_id, task_tags.tag_id"))
+    known_unique = IntegrityError("", {}, RuntimeError("UNIQUE constraint failed: tasks.id"))
     unknown = IntegrityError("", {}, RuntimeError("CHECK constraint failed: future_constraint"))
     with pytest.raises(ValidationError):
         _translate_task_integrity_error(known_check)
@@ -430,15 +299,21 @@ def test_normalization_and_task_integrity_translation_boundaries() -> None:
 
 
 def test_task_creation_failure_is_atomic_from_fresh_connection(application, tmp_path) -> None:
+    class _FixedId:
+        def new(self) -> str:
+            return "duplicate-id"
+
     observed = _task_events(application, "TASK_CREATED")
-    with pytest.raises(NotFoundError):
-        application.tasks.create_task(CreateTask(title="must not persist", tag_ids=("missing",)))
+    application.tasks._ids = _FixedId()
+    application.tasks.create_task(CreateTask(title="first"))
+    with pytest.raises(ConflictError):
+        application.tasks.create_task(CreateTask(title="must not persist"))
     application.engine.dispose()
     fresh = create_sqlite_engine(application.engine.url.database and __import__("pathlib").Path(application.engine.url.database))
     try:
         with fresh.connect() as connection:
             assert connection.execute(text("SELECT count(*) FROM tasks WHERE title='must not persist'")).scalar_one() == 0
-            assert connection.execute(text("SELECT count(*) FROM task_tags")).scalar_one() == 0
+            assert connection.execute(text("SELECT count(*) FROM tasks")).scalar_one() == 1
     finally:
         fresh.dispose()
-    assert observed == []
+    assert len(observed) == 1

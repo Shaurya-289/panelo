@@ -11,7 +11,6 @@ import productivity_app.db.unit_of_work as uow_module
 from productivity_app.core.events import DomainEvent, DomainEventType
 from productivity_app.core.exceptions import ApplicationLifecycleError
 from productivity_app.schemas.backups import RestoreBackup
-from productivity_app.schemas.folders import CreateFolder, RenameFolder
 from productivity_app.schemas.notes import CreateNote, UpdateNote
 from productivity_app.schemas.reminders import CreateReminder, ReminderPageQuery, UpdateReminder
 from productivity_app.schemas.settings import SettingsPatch, Theme
@@ -58,25 +57,24 @@ def test_representative_frozen_success_events_keep_exact_identity_contracts(appl
     assert changed_settings.version == settings.version + 1
 
 
-def test_folder_update_event_keeps_its_exact_post_commit_identity_contract(application, clock) -> None:
-    folder = application.folders.create_folder(CreateFolder(name="event folder"))
+def test_note_update_event_keeps_its_exact_post_commit_identity_contract(application, clock) -> None:
+    note = application.notes.create_note(CreateNote(title="event note"))
     clock.now += timedelta(microseconds=1)
     observed: list[DomainEvent] = []
     persisted_at_delivery = []
 
     def capture(event: DomainEvent) -> None:
         observed.append(event)
-        persisted_at_delivery.append(application.folders.get_folder(event.entity_id))
+        persisted_at_delivery.append(application.notes.get_note(event.entity_id))
 
-    application.subscribe("FOLDER_UPDATED", capture)
-    updated = application.folders.rename_folder(
-        folder.id,
-        RenameFolder(name="renamed event folder", expected_version=folder.version),
+    application.subscribe("NOTE_UPDATED", capture)
+    updated = application.notes.update_note(
+        note.id, UpdateNote(expected_version=note.version, title="renamed event note", color="teal")
     )
 
-    assert updated.version == folder.version + 1
+    assert updated.version == note.version + 1 and updated.color == "teal"
     assert [(event.event_type, event.entity_id, event.event_id) for event in observed] == [
-        ("FOLDER_UPDATED", folder.id, f"folder:FOLDER_UPDATED:{folder.id}:{updated.version}")
+        ("NOTE_UPDATED", note.id, f"note:NOTE_UPDATED:{note.id}:{updated.version}")
     ]
     assert observed[0].occurred_at_utc == clock.now
     assert observed[0].payload == {}
@@ -195,19 +193,17 @@ def test_subscription_closure_duplicates_and_failing_subscribers_preserve_durabl
 
 def test_event_order_registry_and_runtime_swap_do_not_mix_generations(application, clock) -> None:
     expected_registry = {
-        "FOLDER_CREATED", "FOLDER_UPDATED", "FOLDER_MOVED", "FOLDER_DELETED", "FOLDER_RESTORED",
-        "TAG_CREATED", "TAG_UPDATED", "TAG_DELETED", "TAG_RESTORED", "NOTE_CREATED", "NOTE_UPDATED",
-        "NOTE_MOVED", "NOTE_TAGS_CHANGED", "NOTE_PINNED", "NOTE_UNPINNED", "NOTE_ARCHIVED",
-        "NOTE_UNARCHIVED", "NOTE_DELETED", "NOTE_RESTORED", "TASK_CREATED", "TASK_UPDATED",
-        "TASK_STARTED", "TASK_RETURNED_TO_TODO", "TASK_COMPLETED", "TASK_CANCELLED", "TASK_REOPENED",
-        "TASK_MOVED", "TASK_TAGS_CHANGED", "TASK_DELETED", "TASK_RESTORED", "REMINDER_CREATED",
+        "NOTE_CREATED", "NOTE_UPDATED", "NOTE_PINNED", "NOTE_UNPINNED", "NOTE_ARCHIVED",
+        "NOTE_UNARCHIVED", "NOTE_DELETED", "NOTE_RESTORED", "NOTE_PURGED", "TASK_CREATED",
+        "TASK_UPDATED", "TASK_STARTED", "TASK_RETURNED_TO_TODO", "TASK_COMPLETED", "TASK_CANCELLED",
+        "TASK_REOPENED", "TASK_DELETED", "TASK_RESTORED", "TASK_PURGED", "REMINDER_CREATED",
         "REMINDER_UPDATED", "REMINDER_SNOOZED", "REMINDER_COMPLETED", "REMINDER_DISMISSED",
-        "REMINDER_CANCELLED", "REMINDER_REOPENED", "REMINDER_DELETED", "REMINDER_RESTORED", "TIMER_CREATED",
+        "REMINDER_CANCELLED", "REMINDER_REOPENED", "REMINDER_DELETED", "TIMER_CREATED",
         "TIMER_UPDATED", "TIMER_STARTED", "TIMER_PAUSED", "TIMER_RESUMED", "TIMER_RESET", "TIMER_COMPLETED",
         "TIMER_CANCELLED", "TIMER_DELETED", "TIMER_RESTORED", "TIMER_PRESET_CREATED", "TIMER_PRESET_UPDATED",
         "TIMER_PRESET_MOVED", "TIMER_PRESET_DELETED", "TIMER_PRESET_RESTORED", "SETTINGS_CHANGED",
-            "FOCUS_SEQUENCE_STARTED", "FOCUS_PHASE_ADVANCED", "FOCUS_SEQUENCE_COMPLETED",
-            "FOCUS_SEQUENCE_CANCELLED",
+        "FOCUS_SEQUENCE_STARTED", "FOCUS_PHASE_ADVANCED", "FOCUS_SEQUENCE_COMPLETED",
+        "FOCUS_SEQUENCE_CANCELLED",
     }
     assert {item.value for item in DomainEventType} == expected_registry
     assert {"SEARCH_COMPLETED", "BACKUP_CREATED", "BACKUP_DELETED", "RESTORE_COMPLETED", "NOTIFICATION_SENT"}.isdisjoint(expected_registry)
@@ -245,12 +241,12 @@ def test_timer_completion_and_reminder_time_passage_keep_frozen_event_semantics(
     clock.now += timedelta(seconds=1)
     assert application.reminders.get_reminder(reminder.id).timing_state == "OVERDUE"
     assert application.reminders.list_reminder_events(reminder.id, ReminderPageQuery()) == initial_history
-    completed = application.timers.reconcile_expired_timer()
-    assert completed is not None and completed.ended_at_utc == deadline
+    (completed,) = application.timers.reconcile_expired_timers()
+    assert completed.ended_at_utc == deadline
     assert [(event.event_type, event.entity_id, event.event_id, event.occurred_at_utc, event.payload) for event in observed] == [
         ("TIMER_COMPLETED", timer.id, f"timer:timer_completed:{timer.id}:{completed.version}", clock.now, {})
     ]
-    assert application.timers.reconcile_expired_timer() is None
+    assert application.timers.reconcile_expired_timers() == ()
     assert len(observed) == 1
     updated = application.reminders.update_reminder(
         reminder.id, UpdateReminder(expected_version=reminder.version, title="mutated")

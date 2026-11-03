@@ -9,8 +9,6 @@ FTS_SOURCE_SPECS: Final[dict[str, tuple[str, str, str]]] = {
     "notes": ("NOTE", "title", "content"),
     "reminders": ("REMINDER", "title", "message"),
     "timers": ("TIMER", "name", "''"),
-    "folders": ("FOLDER", "name", "''"),
-    "tags": ("TAG", "name", "''"),
     "timer_presets": ("TIMER_PRESET", "name", "''"),
 }
 

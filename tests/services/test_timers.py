@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import pytest
 
-from productivity_app.core.exceptions import ActiveTimerConflictError, InvalidStateTransitionError
+from productivity_app.core.exceptions import InvalidStateTransitionError
 from productivity_app.schemas.timers import CreateTimer
 
 
@@ -27,21 +27,25 @@ def test_timer_lifecycle_uses_anchor_elapsed_time(application, clock) -> None:
     assert len(runs) == 1 and runs[0].outcome == "FINISHED"
 
 
-def test_timer_active_slot_and_derived_expiry_are_not_writes(application, clock) -> None:
+def test_several_timers_run_at_once_and_derived_expiry_is_not_a_write(application, clock) -> None:
     first = application.timers.create_timer(CreateTimer(name="First", planned_duration_ms=1_000))
-    second = application.timers.create_timer(CreateTimer(name="Second", planned_duration_ms=1_000))
+    second = application.timers.create_timer(CreateTimer(name="Second", planned_duration_ms=5_000))
     started = application.timers.start_timer(first.id, first.version)
-    with pytest.raises(ActiveTimerConflictError):
-        application.timers.start_timer(second.id, second.version)
+    also = application.timers.start_timer(second.id, second.version)
+    assert {timer.id for timer in application.timers.list_active_timers()} == {first.id, second.id}
     clock.now += timedelta(milliseconds=1_000)
     read = application.timers.get_timer(first.id)
     assert read.state == "RUNNING" and read.effective_state == "FINISHED"
     assert read.needs_reconciliation and read.version == started.version
     with pytest.raises(InvalidStateTransitionError):
         application.timers.pause_timer(first.id, started.version)
-    reconciled = application.timers.reconcile_expired_timer()
-    assert reconciled is not None and reconciled.state == "FINISHED"
+    (reconciled,) = application.timers.reconcile_expired_timers()
+    assert reconciled.id == first.id and reconciled.state == "FINISHED"
     assert reconciled.ended_at_utc == started.deadline_at_utc
+    # Only the expired timer finished; the other keeps running.
+    assert application.timers.get_timer(second.id).state == "RUNNING"
+    assert [timer.id for timer in application.timers.list_active_timers()] == [second.id]
+    assert also.state == "RUNNING"
 
 
 def test_cancel_reset_delete_restore(application, clock) -> None:

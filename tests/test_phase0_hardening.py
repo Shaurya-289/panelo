@@ -43,24 +43,22 @@ def test_startup_is_independent_of_current_working_directory(
 def test_migrated_schema_exposes_phase_zero_contract(application) -> None:
     inspector = inspect(application.engine)
     expected_tables = {
-        "folders", "tags", "notes", "tasks", "note_tags", "task_tags", "reminders",
-        "reminder_events", "timer_presets", "timers", "timer_runs", "app_settings",
+        "notes", "tasks", "reminders", "reminder_events", "timer_presets", "timers", "timer_runs", "app_settings",
         "notification_deliveries", "external_notifications",
     }
     assert expected_tables <= set(inspector.get_table_names())
+    assert not {"folders", "tags", "note_tags", "task_tags"} & set(inspector.get_table_names())
     task_columns = {column["name"]: column for column in inspector.get_columns("tasks")}
     assert task_columns["id"]["nullable"] is False
     assert task_columns["due_at_utc"]["nullable"] is True
-    assert {foreign_key["referred_table"] for foreign_key in inspector.get_foreign_keys("tasks")} == {
-        "folders"
-    }
+    assert inspector.get_foreign_keys("tasks") == []
     task_checks = {constraint["name"] for constraint in inspector.get_check_constraints("tasks")}
     assert {"ck_tasks_priority_values", "ck_tasks_status_values", "ck_tasks_terminal_timestamps"} <= task_checks
     timer_indexes = {index["name"]: index for index in inspector.get_indexes("timer_runs")}
     assert timer_indexes["ux_timer_runs_one_open"]["unique"] == 1
-    folder_indexes = {index["name"]: index for index in inspector.get_indexes("folders")}
-    assert folder_indexes["ux_folders_active_root_position"]["unique"] == 1
-    assert folder_indexes["ux_folders_active_child_position"]["unique"] == 1
+    preset_indexes = {index["name"]: index for index in inspector.get_indexes("timer_presets")}
+    assert preset_indexes["ux_timer_presets_active_position"]["unique"] == 1
+    assert preset_indexes["ux_timer_presets_active_name"]["unique"] == 1
 
 
 def test_initial_migration_can_downgrade_and_upgrade(application) -> None:
@@ -75,10 +73,10 @@ def test_database_invariants_reject_invalid_rows(application) -> None:
     now = datetime(2026, 9, 24, tzinfo=UTC)
     session = application.session_factory()
     try:
-        session.execute(text("INSERT INTO folders VALUES ('root', 'Root', 'root', NULL, 0, NULL, :n, :n, 1)"), {"n": datetime_to_epoch_microseconds(now)})
+        session.execute(text("INSERT INTO timer_presets VALUES ('first', 'First', 'first', 1000, 0, 0, NULL, :n, :n, 1)"), {"n": datetime_to_epoch_microseconds(now)})
         session.commit()
         with pytest.raises(IntegrityError):
-            session.execute(text("INSERT INTO folders VALUES ('root-2', 'Other', 'other', NULL, 0, NULL, :n, :n, 1)"), {"n": datetime_to_epoch_microseconds(now)})
+            session.execute(text("INSERT INTO timer_presets VALUES ('second', 'Other', 'other', 1000, 0, 0, NULL, :n, :n, 1)"), {"n": datetime_to_epoch_microseconds(now)})
             session.commit()
         session.rollback()
         with pytest.raises(IntegrityError):
@@ -86,7 +84,7 @@ def test_database_invariants_reject_invalid_rows(application) -> None:
             session.commit()
         session.rollback()
         with pytest.raises(IntegrityError):
-            session.execute(text("INSERT INTO note_tags (note_id, tag_id) VALUES ('missing-note', 'missing-tag')"))
+            session.execute(text("INSERT INTO reminder_events (id, reminder_id, event_type, occurred_at_utc) VALUES ('event', 'missing-reminder', 'X', 1)"))
             session.commit()
     finally:
         session.rollback()

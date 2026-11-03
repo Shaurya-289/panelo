@@ -7,14 +7,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+NoteColor = Literal["none", "plum", "rose", "amber", "moss", "teal", "slate", "sand"]
+
 
 class CreateNote(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(default="", max_length=300)
     content: str = Field(default="")
-    folder_id: str | None = None
-    tag_ids: tuple[str, ...] = ()
     is_pinned: bool = False
+    color: NoteColor = "none"
 
 
 class UpdateNote(BaseModel):
@@ -24,12 +25,11 @@ class UpdateNote(BaseModel):
     content: str | None = None
     is_pinned: bool | None = None
     is_archived: bool | None = None
+    color: NoteColor | None = None
 
 
 class NoteQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    folder_id: str | None = None
-    tag_id: str | None = None
     is_pinned: bool | None = None
     is_archived: bool | None = None
     include_deleted: bool = False
@@ -52,10 +52,9 @@ class NoteView(BaseModel):
     id: str
     title: str
     content: str
-    folder_id: str | None
-    tag_ids: tuple[str, ...]
     is_pinned: bool
     is_archived: bool
+    color: NoteColor
     created_at_utc: datetime
     updated_at_utc: datetime
     version: int

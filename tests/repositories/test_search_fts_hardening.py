@@ -15,11 +15,9 @@ from productivity_app.db.fts_contract import (
 )
 from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
 from productivity_app.repositories.search import SearchRepository
-from productivity_app.schemas.folders import CreateFolder
 from productivity_app.schemas.notes import CreateNote
 from productivity_app.schemas.reminders import CreateReminder
 from productivity_app.schemas.search import FullTextSearchQuery
-from productivity_app.schemas.tags import CreateTag
 from productivity_app.schemas.tasks import CreateTask
 from productivity_app.schemas.timers import CreateTimer, CreateTimerPreset, UpdateTimer
 
@@ -245,10 +243,10 @@ def test_full_text_ranking_tiers_entity_priority_and_id_tie_break(application) -
         _insert_timer(connection, "00000000-0000-0000-0000-000000000005", "tied alpha")
         _insert_timer(connection, "00000000-0000-0000-0000-000000000004", "tied alpha")
         connection.execute(text(
-            "INSERT INTO tasks(id,title,description,status,priority,folder_id,start_at_utc,due_at_utc,"
+            "INSERT INTO tasks(id,title,description,status,priority,start_at_utc,due_at_utc,"
             "completed_at_utc,cancelled_at_utc,created_at_utc,updated_at_utc,version,deleted_at_utc) "
             "VALUES('10000000-0000-0000-0000-000000000001','unrelated','alpha body','TODO','NORMAL',"
-            "NULL,NULL,NULL,NULL,NULL,1,1,1,NULL)"
+            "NULL,NULL,NULL,NULL,1,1,1,NULL)"
         ))
     ordered = [item.entity_id for item in application.search.search_full_text(
         FullTextSearchQuery(text="alpha", mode="TERMS")
@@ -293,9 +291,9 @@ def test_bm25_then_updated_at_then_id_are_deterministic(application) -> None:
             ("30000000-0000-0000-0000-000000000002", "alpha alpha alpha alpha"),
         ):
             connection.execute(text(
-                "INSERT INTO tasks(id,title,description,status,priority,folder_id,start_at_utc,due_at_utc,"
+                "INSERT INTO tasks(id,title,description,status,priority,start_at_utc,due_at_utc,"
                 "completed_at_utc,cancelled_at_utc,created_at_utc,updated_at_utc,version,deleted_at_utc) "
-                "VALUES(:id,'bm25 body',:body,'TODO','NORMAL',NULL,NULL,NULL,NULL,NULL,1,1,1,NULL)"
+                "VALUES(:id,'bm25 body',:body,'TODO','NORMAL',NULL,NULL,NULL,NULL,1,1,1,NULL)"
             ), {"id": task_id, "body": body})
         _insert_timer(connection, "30000000-0000-0000-0000-000000000003", "middle alpha", 10)
         _insert_timer(connection, "30000000-0000-0000-0000-000000000004", "middle alpha", 20)
@@ -322,10 +320,8 @@ def test_entity_priority_is_final_cross_type_tie_break(application) -> None:
         title=common, due_at_utc=application._clock.now, scheduled_timezone="UTC"
     ))
     timer = application.timers.create_timer(CreateTimer(name=common, planned_duration_ms=60_000))
-    folder = application.folders.create_folder(CreateFolder(name=common))
-    tag = application.tags.create_tag(CreateTag(name=common))
     preset = application.timers.create_preset(CreateTimerPreset(name=common, duration_ms=60_000))
-    expected = [task.id, note.id, reminder.id, timer.id, folder.id, tag.id, preset.id]
+    expected = [task.id, note.id, reminder.id, timer.id, preset.id]
     actual = [item.entity_id for item in application.search.search_full_text(
         FullTextSearchQuery(text=common, mode="PHRASE")
     )]

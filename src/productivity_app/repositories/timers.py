@@ -50,20 +50,26 @@ class TimerRepository:
         )
         return result.rowcount == 1
 
-    def active(self, *, exclude_id: str | None = None) -> Timer | None:
-        query = select(Timer).where(
-            Timer.deleted_at_utc.is_(None), Timer.state.in_(("RUNNING", "PAUSED"))
+    def active_timers(self) -> list[Timer]:
+        """Running and paused timers, the most recently started first."""
+        return list(
+            self._session.scalars(
+                select(Timer)
+                .where(Timer.deleted_at_utc.is_(None), Timer.state.in_(("RUNNING", "PAUSED")))
+                .order_by(Timer.first_started_at_utc.desc(), Timer.id)
+            )
         )
-        if exclude_id is not None:
-            query = query.where(Timer.id != exclude_id)
-        return self._session.scalar(query)
 
-    def expired_running(self, now_utc: datetime) -> Timer | None:
-        return self._session.scalar(
-            select(Timer).where(
-                Timer.deleted_at_utc.is_(None),
-                Timer.state == "RUNNING",
-                Timer.deadline_at_utc <= now_utc,
+    def expired_running(self, now_utc: datetime) -> list[Timer]:
+        return list(
+            self._session.scalars(
+                select(Timer)
+                .where(
+                    Timer.deleted_at_utc.is_(None),
+                    Timer.state == "RUNNING",
+                    Timer.deadline_at_utc <= now_utc,
+                )
+                .order_by(Timer.deadline_at_utc, Timer.id)
             )
         )
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import case, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
@@ -43,30 +44,61 @@ class ReminderRepository:
     def add_event(self, event: ReminderEvent) -> None:
         self._session.add(event)
 
-    def claim_version(
-        self, reminder_id: str, expected_version: int, now_utc: datetime, *, deleted: bool
-    ) -> bool:
+    def claim_version(self, reminder_id: str, expected_version: int, now_utc: datetime) -> bool:
         """Atomically claim one expected version; ``True`` means one row changed."""
         result = cast(
             CursorResult[Any],
             self._session.execute(
                 update(Reminder)
-                .where(
-                    Reminder.id == reminder_id,
-                    Reminder.version == expected_version,
-                    Reminder.deleted_at_utc.is_not(None)
-                    if deleted
-                    else Reminder.deleted_at_utc.is_(None),
-                )
+                .where(Reminder.id == reminder_id, Reminder.version == expected_version)
                 .values(version=Reminder.version + 1, updated_at_utc=now_utc)
             ),
         )
         return result.rowcount == 1
 
+    def delete(self, reminder_id: str) -> None:
+        """Remove the row for good; its audit events go with it (``ON DELETE CASCADE``)."""
+        self._session.execute(delete(ReminderEvent).where(ReminderEvent.reminder_id == reminder_id))
+        self._session.execute(delete(Reminder).where(Reminder.id == reminder_id))
+
+    def completion_counts(self, reminder_ids: Sequence[str]) -> dict[str, int]:
+        """How many times Done advanced each repeating reminder to its next occurrence."""
+        if not reminder_ids:
+            return {}
+        rows = self._session.execute(
+            select(ReminderEvent.reminder_id, func.count())
+            .where(
+                ReminderEvent.reminder_id.in_(reminder_ids),
+                ReminderEvent.event_type == "COMPLETED_OCCURRENCE",
+            )
+            .group_by(ReminderEvent.reminder_id)
+        ).all()
+        return {str(reminder_id): int(count) for reminder_id, count in rows}
+
+    def clear_links(
+        self, *, task_id: str | None = None, note_id: str | None = None, now_utc: datetime
+    ) -> list[str]:
+        """Detach every reminder linked to a task or note that is being deleted for good.
+
+        Each detached reminder gets a new version, so cached copies are seen as stale.
+        """
+        column = Reminder.task_id if task_id is not None else Reminder.note_id
+        ids = list(
+            self._session.scalars(
+                select(Reminder.id).where(column == (task_id if task_id is not None else note_id))
+            )
+        )
+        if ids:
+            values: dict[str, Any] = {
+                "task_id" if task_id is not None else "note_id": None,
+                "version": Reminder.version + 1,
+                "updated_at_utc": now_utc,
+            }
+            self._session.execute(update(Reminder).where(Reminder.id.in_(ids)).values(**values))
+        return ids
+
     def list_reminders(self, data: ReminderQuery, now_utc: datetime) -> list[Reminder]:
         query = select(Reminder)
-        if not data.include_deleted:
-            query = query.where(Reminder.deleted_at_utc.is_(None))
         if data.statuses:
             query = query.where(Reminder.status.in_(data.statuses))
         if data.timing_states:
@@ -111,10 +143,7 @@ class ReminderRepository:
         return list(
             self._session.scalars(
                 select(Reminder)
-                .where(
-                    Reminder.deleted_at_utc.is_(None),
-                    Reminder.status.in_(("DISMISSED", "COMPLETED", "CANCELLED")),
-                )
+                .where(Reminder.status.in_(("DISMISSED", "COMPLETED", "CANCELLED")))
                 .order_by(_TERMINAL_AT.desc(), Reminder.updated_at_utc.desc(), Reminder.id)
                 .offset(offset)
                 .limit(limit)
@@ -136,11 +165,7 @@ class ReminderRepository:
         return list(
             self._session.scalars(
                 select(Reminder)
-                .where(
-                    Reminder.deleted_at_utc.is_(None),
-                    Reminder.status.in_(_ACTIVE),
-                    predicate,
-                )
+                .where(Reminder.status.in_(_ACTIVE), predicate)
                 .order_by(Reminder.due_at_utc, Reminder.id)
                 .offset(offset)
                 .limit(limit)

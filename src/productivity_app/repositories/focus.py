@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, cast
 
@@ -100,3 +101,27 @@ class FocusRepository:
             statement = statement.where(TimerRun.started_at_utc < query.started_before_utc)
         duration, completed = self._session.execute(statement).one()
         return int(completed or 0), int(duration or 0)
+
+    def focus_runs_since(self, started_from_utc: datetime) -> list[tuple[datetime, int, str]]:
+        """``(started, actual milliseconds, outcome)`` of finished focus runs from an instant on."""
+        rows = self._session.execute(
+            select(TimerRun.started_at_utc, TimerRun.actual_duration_ms, TimerRun.outcome)
+            .join(FocusSession, FocusSession.timer_id == TimerRun.timer_id)
+            .where(
+                FocusSession.phase_kind == "FOCUS",
+                TimerRun.outcome.in_(("FINISHED", "FINISHED_EARLY")),
+                TimerRun.started_at_utc >= started_from_utc,
+            )
+        ).all()
+        return [(started, int(actual), str(outcome)) for started, actual, outcome in rows]
+
+    def completed_focus_starts(self) -> Iterator[datetime]:
+        """Start times of the focus sessions that ran their full length, newest first."""
+        return iter(
+            self._session.scalars(
+                select(TimerRun.started_at_utc)
+                .join(FocusSession, FocusSession.timer_id == TimerRun.timer_id)
+                .where(FocusSession.phase_kind == "FOCUS", TimerRun.outcome == "FINISHED")
+                .order_by(TimerRun.started_at_utc.desc())
+            )
+        )

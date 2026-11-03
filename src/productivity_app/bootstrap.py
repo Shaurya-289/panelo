@@ -37,14 +37,13 @@ from productivity_app.db.unit_of_work import UnitOfWorkFactory, create_unit_of_w
 from productivity_app.schemas.backups import BackupRestoreView, RestoreBackup
 from productivity_app.services.backups import BackupService
 from productivity_app.services.focus import FocusService
-from productivity_app.services.folders import FolderService
 from productivity_app.services.notes import NoteService
 from productivity_app.services.reminders import ReminderService
 from productivity_app.services.search import SearchService
 from productivity_app.services.settings import SettingsService
-from productivity_app.services.tags import TagService
 from productivity_app.services.tasks import TaskService
 from productivity_app.services.timers import TimerService
+from productivity_app.services.trash import TrashService
 
 _MIGRATIONS_DIRECTORY = Path(__file__).resolve().parent / "db" / "migrations"
 
@@ -85,10 +84,9 @@ class RuntimeComponents:
     session_factory: sessionmaker[Session]
     unit_of_work_factory: UnitOfWorkFactory
     settings: SettingsService
-    folders: FolderService
-    tags: TagService
     notes: NoteService
     tasks: TaskService
+    trash: TrashService
     reminders: ReminderService
     timers: TimerService
     search: SearchService
@@ -101,17 +99,16 @@ class RuntimeComponents:
 @dataclass(slots=True)
 class Application:
     _RUNTIME_ATTRIBUTES: ClassVar[frozenset[str]] = frozenset({
-        "engine", "session_factory", "unit_of_work_factory", "settings", "folders", "tags",
-        "notes", "tasks", "reminders", "timers", "search", "backups", "focus", "_event_bus", "_gate",
+        "engine", "session_factory", "unit_of_work_factory", "settings", "notes", "tasks", "trash",
+        "reminders", "timers", "search", "backups", "focus", "_event_bus", "_gate",
     })
     engine: Engine
     session_factory: sessionmaker[Session]
     unit_of_work_factory: UnitOfWorkFactory
     settings: SettingsService
-    folders: FolderService
-    tags: TagService
     notes: NoteService
     tasks: TaskService
+    trash: TrashService
     reminders: ReminderService
     timers: TimerService
     search: SearchService
@@ -141,10 +138,9 @@ class Application:
             session_factory=self.session_factory,
             unit_of_work_factory=self.unit_of_work_factory,
             settings=self.settings,
-            folders=self.folders,
-            tags=self.tags,
             notes=self.notes,
             tasks=self.tasks,
+            trash=self.trash,
             reminders=self.reminders,
             timers=self.timers,
             search=self.search,
@@ -289,23 +285,25 @@ def _compose_application(config: AppConfig, clock: Clock, *, run_migrations: boo
         gate = ApplicationLifecycleGate()
         uow_factory = create_unit_of_work_factory(session_factory, event_bus, gate)
         settings = SettingsService(uow_factory, clock)
-        folders, tags = FolderService(uow_factory, clock), TagService(uow_factory, clock)
         notes, tasks = NoteService(uow_factory, clock), TaskService(uow_factory, clock)
+        trash = TrashService(uow_factory, clock)
         reminders, timers = ReminderService(uow_factory, clock), TimerService(uow_factory, clock)
         search = SearchService(uow_factory, clock)
         focus = FocusService(uow_factory, clock)
-        backups = BackupService(config.database.path, config.database.busy_timeout_ms, clock, Uuid4Generator(), gate)
+        backups = BackupService(
+            config.database.path, config.database.busy_timeout_ms, clock, Uuid4Generator(), gate,
+            settings,
+        )
         settings.get_settings()
-        timers.reconcile_expired_timer()
+        timers.reconcile_expired_timers()
         return Application(
             engine=engine,
             session_factory=session_factory,
             unit_of_work_factory=uow_factory,
             settings=settings,
-            folders=folders,
-            tags=tags,
             notes=notes,
             tasks=tasks,
+            trash=trash,
             reminders=reminders,
             timers=timers,
             search=search,

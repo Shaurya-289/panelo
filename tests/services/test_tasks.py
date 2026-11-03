@@ -10,8 +10,6 @@ from productivity_app.core.exceptions import (
     StaleVersionError,
     ValidationError,
 )
-from productivity_app.schemas.folders import CreateFolder
-from productivity_app.schemas.tags import CreateTag
 from productivity_app.schemas.tasks import (
     CreateTask,
     TaskCalendarQuery,
@@ -22,26 +20,51 @@ from productivity_app.schemas.tasks import (
 )
 
 
-def test_task_crud_tags_and_optimistic_concurrency(application) -> None:
-    folder = application.folders.create_folder(CreateFolder(name="Inbox"))
-    tag = application.tags.create_tag(CreateTag(name="Work"))
+def test_task_crud_and_optimistic_concurrency(application) -> None:
     task = application.tasks.create_task(
-        CreateTask(title="  Write plan  ", description="body", folder_id=folder.id, tag_ids=(tag.id, tag.id))
+        CreateTask(title="  Write plan  ", description="body")
     )
     assert task.title == "Write plan"
     assert task.status == "TODO"
     assert task.priority == "NORMAL"
-    assert task.tag_ids == (tag.id,)
 
     changed = application.tasks.update_task(
-        task.id, UpdateTask(expected_version=task.version, priority="URGENT", folder_id=None)
+        task.id, UpdateTask(expected_version=task.version, priority="URGENT")
     )
-    assert changed.folder_id is None
     assert changed.priority == "URGENT"
     assert changed.version == task.version + 1
     with pytest.raises(StaleVersionError):
         application.tasks.update_task(task.id, UpdateTask(expected_version=task.version, title="lost"))
     assert application.tasks.list_tasks(TaskQuery(priorities=("URGENT",)))[0].id == task.id
+
+
+def test_task_date_only_flag_defaults_to_a_timed_due_date_and_round_trips(application, clock) -> None:
+    midnight = datetime(2026, 9, 25, tzinfo=UTC)
+    timed = application.tasks.create_task(CreateTask(title="Timed", due_at_utc=clock.now))
+    dated = application.tasks.create_task(
+        CreateTask(title="Dated", due_at_utc=midnight, due_has_time=False)
+    )
+    assert timed.due_has_time is True
+    assert dated.due_has_time is False and dated.due_at_utc == midnight
+    summary = {row.id: row for row in application.tasks.list_tasks()}
+    assert summary[dated.id].due_has_time is False and summary[timed.id].due_has_time is True
+
+    flipped = application.tasks.update_task(
+        dated.id,
+        UpdateTask(expected_version=dated.version, due_at_utc=clock.now, due_has_time=True),
+    )
+    assert flipped.due_has_time is True and flipped.due_at_utc == clock.now
+    with pytest.raises(ValidationError):
+        application.tasks.update_task(
+            flipped.id, UpdateTask(expected_version=flipped.version, due_has_time=None)
+        )
+
+
+def test_task_summaries_expose_completion_time(application, clock) -> None:
+    task = application.tasks.create_task(CreateTask(title="Done today"))
+    done = application.tasks.complete_task(task.id, task.version)
+    summary = application.tasks.list_tasks(TaskQuery(statuses=("COMPLETED",)))[0]
+    assert summary.completed_at_utc == clock.now == done.completed_at_utc
 
 
 def test_task_lifecycle_delete_and_restore(application, clock) -> None:
@@ -65,23 +88,7 @@ def test_task_lifecycle_delete_and_restore(application, clock) -> None:
     assert restored.deleted_at_utc is None
 
 
-def test_task_tag_replacement_and_restore_after_folder_delete(application) -> None:
-    first = application.tags.create_tag(CreateTag(name="First"))
-    second = application.tags.create_tag(CreateTag(name="Second"))
-    folder = application.folders.create_folder(CreateFolder(name="Temporary"))
-    task = application.tasks.create_task(CreateTask(title="Tagged", folder_id=folder.id, tag_ids=(first.id,)))
-    changed = application.tasks.set_task_tags(task.id, (second.id, second.id), task.version)
-    assert changed.tag_ids == (second.id,)
-    with pytest.raises(ValidationError):
-        application.tasks.set_task_tags(changed.id, (second.id,), changed.version)
-    deleted_task = application.tasks.delete_task(changed.id, changed.version)
-    application.folders.delete_folder(folder.id, folder.version)
-    restored = application.tasks.restore_task(deleted_task.id, deleted_task.version + 1)
-    assert restored.folder_id is None
-    assert restored.tag_ids == (second.id,)
-
-
-def test_task_date_validation_and_folder_deletion_relocates_task(application, clock) -> None:
+def test_task_date_validation(application) -> None:
     with pytest.raises(ValidationError):
         application.tasks.update_task("missing", UpdateTask(expected_version=1))
     with pytest.raises(ValueError):
@@ -90,13 +97,6 @@ def test_task_date_validation_and_folder_deletion_relocates_task(application, cl
             start_at_utc=datetime(2026, 9, 25, tzinfo=UTC),
             due_at_utc=datetime(2026, 9, 24, tzinfo=UTC),
         )
-    folder = application.folders.create_folder(CreateFolder(name="Parent"))
-    task = application.tasks.create_task(CreateTask(title="Move with folder", folder_id=folder.id))
-    deleted = application.folders.delete_folder(folder.id, folder.version)
-    assert deleted.deleted_at_utc == clock.now
-    moved = application.tasks.get_task(task.id)
-    assert moved.folder_id is None
-    assert moved.version == task.version + 1
 
 
 def test_task_search_escapes_wildcards_and_excludes_terminal_by_default(application) -> None:

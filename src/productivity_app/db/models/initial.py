@@ -1,4 +1,4 @@
-"""Initial persistence mappings. Domain behavior belongs in later services."""
+"""Persistence mappings. Domain behavior belongs in the services."""
 
 from __future__ import annotations
 
@@ -8,15 +8,12 @@ from enum import StrEnum
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
-    Column,
     ForeignKey,
     Index,
     Integer,
     String,
-    Table,
     Text,
     UniqueConstraint,
-    literal_column,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +31,18 @@ DEFAULT_SETTINGS_VALUES: dict[str, object] = {
     "pomodoro_work_duration_ms": 1_500_000,
     "short_break_duration_ms": 300_000,
     "long_break_duration_ms": 900_000,
+    "user_name": "",
+    "tour_done": False,
+    "notification_style": "TOAST",
+    "notification_sound": "",
+    "backdrop_blur": 100,
+    "backdrop_dim": 45,
+    "overlay_size_pct": 85,
+    "overlay_layout_json": "",
+    "files_view_mode": "LIST",
+    "library_path": "",
+    "auto_backup": True,
+    "keep_backups": 7,
 }
 
 
@@ -68,93 +77,17 @@ class TimerState(StrEnum):
     CANCELLED = "CANCELLED"
 
 
-note_tags = Table(
-    "note_tags",
-    Base.metadata,
-    Column("note_id", String(36), ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True),
-    Column("tag_id", String(36), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
-)
-
-task_tags = Table(
-    "task_tags",
-    Base.metadata,
-    Column("task_id", String(36), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True),
-    Column("tag_id", String(36), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
-)
-
-
-class Folder(MutableEntity, Base):
-    __tablename__ = "folders"
-    __table_args__ = (
-        CheckConstraint("sort_order >= 0", name="ck_folders_sort_order_nonnegative"),
-        CheckConstraint("parent_id IS NULL OR parent_id != id", name="ck_folders_no_self_parent"),
-        Index(
-            "ux_folders_active_root_name",
-            "normalized_name",
-            unique=True,
-            sqlite_where=text("parent_id IS NULL AND deleted_at_utc IS NULL"),
-        ),
-        Index(
-            "ux_folders_active_child_name",
-            "parent_id",
-            "normalized_name",
-            unique=True,
-            sqlite_where=text("parent_id IS NOT NULL AND deleted_at_utc IS NULL"),
-        ),
-        Index(
-            "ux_folders_active_root_position",
-            "sort_order",
-            unique=True,
-            sqlite_where=text("parent_id IS NULL AND deleted_at_utc IS NULL"),
-        ),
-        Index(
-            "ux_folders_active_child_position",
-            "parent_id",
-            "sort_order",
-            unique=True,
-            sqlite_where=text("parent_id IS NOT NULL AND deleted_at_utc IS NULL"),
-        ),
-        Index(
-            "ix_folders_parent_active_position",
-            "parent_id",
-            "deleted_at_utc",
-            "sort_order",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    normalized_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    parent_id: Mapped[str | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"))
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
-
-
-class Tag(MutableEntity, Base):
-    __tablename__ = "tags"
-    __table_args__ = (
-        Index(
-            "ux_tags_active_normalized_name",
-            "normalized_name",
-            unique=True,
-            sqlite_where=text("deleted_at_utc IS NULL"),
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    normalized_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
-
-
 class Note(MutableEntity, Base):
     __tablename__ = "notes"
     __table_args__ = (
         CheckConstraint("content_format = 'PLAIN_TEXT'", name="ck_notes_content_format"),
         CheckConstraint("is_pinned IN (0, 1)", name="ck_notes_is_pinned_bool"),
         CheckConstraint("is_archived IN (0, 1)", name="ck_notes_is_archived_bool"),
+        CheckConstraint(
+            "color IN ('none', 'plum', 'rose', 'amber', 'moss', 'teal', 'slate', 'sand')",
+            name="ck_notes_color_values",
+        ),
         Index("ix_notes_list", "deleted_at_utc", "is_archived", "is_pinned", "updated_at_utc"),
-        Index("ix_notes_folder_list", "folder_id", "deleted_at_utc", "updated_at_utc"),
         Index("ix_notes_title", "title"),
     )
 
@@ -162,10 +95,12 @@ class Note(MutableEntity, Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     content_format: Mapped[str] = mapped_column(String(32), nullable=False, default="PLAIN_TEXT")
-    folder_id: Mapped[str | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"))
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    color: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="none", server_default="none"
+    )
 
 
 class Task(MutableEntity, Base):
@@ -189,8 +124,8 @@ class Task(MutableEntity, Base):
             "OR (status IN ('TODO', 'IN_PROGRESS') AND completed_at_utc IS NULL AND cancelled_at_utc IS NULL)",
             name="ck_tasks_terminal_timestamps",
         ),
+        CheckConstraint("due_has_time IN (0, 1)", name="ck_tasks_due_has_time_bool"),
         Index("ix_tasks_status_due", "deleted_at_utc", "status", "due_at_utc"),
-        Index("ix_tasks_folder_status", "folder_id", "deleted_at_utc", "status"),
         Index("ix_tasks_priority_status", "priority", "status", "deleted_at_utc"),
         Index("ix_tasks_completed", "completed_at_utc", "deleted_at_utc"),
     )
@@ -202,12 +137,14 @@ class Task(MutableEntity, Base):
     priority: Mapped[str] = mapped_column(
         String(32), nullable=False, default=TaskPriority.NORMAL.value
     )
-    folder_id: Mapped[str | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"))
     start_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     due_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     completed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     cancelled_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    due_has_time: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("1")
+    )
 
 
 class Reminder(MutableEntity, Base):
@@ -229,7 +166,34 @@ class Reminder(MutableEntity, Base):
             "OR (status IN ('PENDING', 'TRIGGERED', 'OVERDUE') AND dismissed_at_utc IS NULL AND completed_at_utc IS NULL AND cancelled_at_utc IS NULL)",
             name="ck_reminders_terminal_timestamps",
         ),
-        Index("ix_reminders_scheduler", "status", "due_at_utc", "deleted_at_utc"),
+        CheckConstraint(
+            "repeat_kind IS NULL OR repeat_kind IN "
+            "('DAILY', 'WEEKDAYS', 'WEEKLY', 'MONTHLY', 'YEARLY', 'EVERY')",
+            name="ck_reminders_repeat_kind_values",
+        ),
+        CheckConstraint(
+            "repeat_every_unit IS NULL OR repeat_every_unit IN ('HOURS', 'DAYS', 'WEEKS')",
+            name="ck_reminders_repeat_unit_values",
+        ),
+        CheckConstraint(
+            "(repeat_kind IS NULL AND repeat_days IS NULL AND repeat_day_of_month IS NULL "
+            "AND repeat_every_n IS NULL AND repeat_every_unit IS NULL AND anchor_at_utc IS NULL) "
+            "OR (repeat_kind IS NOT NULL AND anchor_at_utc IS NOT NULL AND ("
+            "(repeat_kind IN ('DAILY', 'WEEKDAYS', 'YEARLY') AND repeat_days IS NULL "
+            "AND repeat_day_of_month IS NULL AND repeat_every_n IS NULL "
+            "AND repeat_every_unit IS NULL) "
+            "OR (repeat_kind = 'WEEKLY' AND repeat_days IS NOT NULL "
+            "AND repeat_days BETWEEN 1 AND 127 AND repeat_day_of_month IS NULL "
+            "AND repeat_every_n IS NULL AND repeat_every_unit IS NULL) "
+            "OR (repeat_kind = 'MONTHLY' AND repeat_day_of_month IS NOT NULL "
+            "AND repeat_day_of_month BETWEEN 1 AND 31 AND repeat_days IS NULL "
+            "AND repeat_every_n IS NULL AND repeat_every_unit IS NULL) "
+            "OR (repeat_kind = 'EVERY' AND repeat_every_n IS NOT NULL AND repeat_every_n >= 1 "
+            "AND repeat_every_unit IS NOT NULL AND repeat_days IS NULL "
+            "AND repeat_day_of_month IS NULL)))",
+            name="ck_reminders_repeat_shape",
+        ),
+        Index("ix_reminders_scheduler", "status", "due_at_utc"),
         Index("ix_reminders_task", "task_id"),
         Index("ix_reminders_note", "note_id"),
     )
@@ -249,7 +213,12 @@ class Reminder(MutableEntity, Base):
     completed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     cancelled_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
     snooze_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    deleted_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    repeat_kind: Mapped[str | None] = mapped_column(String(16))
+    repeat_days: Mapped[int | None] = mapped_column(Integer)
+    repeat_day_of_month: Mapped[int | None] = mapped_column(Integer)
+    repeat_every_n: Mapped[int | None] = mapped_column(Integer)
+    repeat_every_unit: Mapped[str | None] = mapped_column(String(8))
+    anchor_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class ReminderEvent(Base):
@@ -316,12 +285,6 @@ class Timer(MutableEntity, Base):
             "OR (state = 'READY' AND elapsed_before_run_ms = 0 AND run_started_at_utc IS NULL AND deadline_at_utc IS NULL AND first_started_at_utc IS NULL AND ended_at_utc IS NULL) "
             "OR (state IN ('FINISHED', 'CANCELLED') AND run_started_at_utc IS NULL AND deadline_at_utc IS NULL AND ended_at_utc IS NOT NULL)",
             name="ck_timers_state_timestamps",
-        ),
-        Index(
-            "ux_timers_one_active",
-            literal_column("1"),
-            unique=True,
-            sqlite_where=text("state IN ('RUNNING', 'PAUSED') AND deleted_at_utc IS NULL"),
         ),
     )
 
@@ -399,6 +362,24 @@ class AppSettings(Base):
         CheckConstraint(
             "long_break_duration_ms BETWEEN 1000 AND 86400000", name="ck_settings_long_break"
         ),
+        CheckConstraint("length(user_name) <= 60", name="ck_settings_user_name_length"),
+        CheckConstraint("tour_done IN (0, 1)", name="ck_settings_tour_done_bool"),
+        CheckConstraint(
+            "notification_style IN ('TOAST', 'WINDOWS', 'BOTH')",
+            name="ck_settings_notification_style_values",
+        ),
+        CheckConstraint(
+            "length(notification_sound) <= 260", name="ck_settings_notification_sound_length"
+        ),
+        CheckConstraint("backdrop_blur BETWEEN 0 AND 100", name="ck_settings_backdrop_blur"),
+        CheckConstraint("backdrop_dim BETWEEN 0 AND 100", name="ck_settings_backdrop_dim"),
+        CheckConstraint("overlay_size_pct BETWEEN 60 AND 90", name="ck_settings_overlay_size"),
+        CheckConstraint(
+            "files_view_mode IN ('LIST', 'GRID')", name="ck_settings_files_view_mode_values"
+        ),
+        CheckConstraint("length(library_path) <= 1024", name="ck_settings_library_path_length"),
+        CheckConstraint("auto_backup IN (0, 1)", name="ck_settings_auto_backup_bool"),
+        CheckConstraint("keep_backups BETWEEN 1 AND 60", name="ck_settings_keep_backups"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
@@ -419,6 +400,43 @@ class AppSettings(Base):
     long_break_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=900_000)
     updated_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    user_name: Mapped[str] = mapped_column(
+        String(60), nullable=False, default="", server_default=text("''")
+    )
+    tour_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    notification_style: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="TOAST", server_default="TOAST"
+    )
+    notification_sound: Mapped[str] = mapped_column(
+        String(260), nullable=False, default="", server_default=text("''")
+    )
+    backdrop_blur: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=text("100")
+    )
+    backdrop_dim: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=45, server_default=text("45")
+    )
+    overlay_size_pct: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=85, server_default=text("85")
+    )
+    overlay_layout_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    files_view_mode: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="LIST", server_default="LIST"
+    )
+    library_path: Mapped[str] = mapped_column(
+        String(1024), nullable=False, default="", server_default=text("''")
+    )
+    auto_backup: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("1")
+    )
+    keep_backups: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=7, server_default=text("7")
+    )
+    last_auto_backup_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 class NotificationDelivery(Base):

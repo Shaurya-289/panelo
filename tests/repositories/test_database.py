@@ -32,10 +32,8 @@ def test_failed_transaction_rolls_back(application) -> None:
         session.close()
 
 
-def test_initial_schema_contains_phase_zero_tables(application) -> None:
+def test_schema_contains_the_application_tables_and_no_tags_or_folders(application) -> None:
     expected = {
-        "folders",
-        "tags",
         "notes",
         "tasks",
         "reminders",
@@ -46,8 +44,6 @@ def test_initial_schema_contains_phase_zero_tables(application) -> None:
         "app_settings",
         "notification_deliveries",
         "external_notifications",
-        "note_tags",
-        "task_tags",
     }
     with application.engine.connect() as connection:
         names = set(
@@ -56,6 +52,7 @@ def test_initial_schema_contains_phase_zero_tables(application) -> None:
             ).scalars()
         )
     assert expected <= names
+    assert not {"folders", "tags", "note_tags", "task_tags"} & names
 
 
 def test_failed_uow_commit_is_atomic_across_a_new_physical_connection(application, app_config) -> None:
@@ -63,16 +60,16 @@ def test_failed_uow_commit_is_atomic_across_a_new_physical_connection(applicatio
         assert uow.session is not None
         uow.session.execute(
             text(
-                "INSERT INTO tags (id, name, normalized_name, deleted_at_utc, "
-                "created_at_utc, updated_at_utc, version) "
-                "VALUES ('tag-one', 'One', 'one', NULL, 1, 1, 1)"
+                "INSERT INTO timer_presets (id, name, normalized_name, duration_ms, sort_order, "
+                "is_builtin, deleted_at_utc, created_at_utc, updated_at_utc, version) "
+                "VALUES ('preset-one', 'One', 'one', 1000, 0, 0, NULL, 1, 1, 1)"
             )
         )
         uow.session.execute(
             text(
-                "INSERT INTO tags (id, name, normalized_name, deleted_at_utc, "
-                "created_at_utc, updated_at_utc, version) "
-                "VALUES ('tag-two', 'Two', 'one', NULL, 1, 1, 1)"
+                "INSERT INTO timer_presets (id, name, normalized_name, duration_ms, sort_order, "
+                "is_builtin, deleted_at_utc, created_at_utc, updated_at_utc, version) "
+                "VALUES ('preset-two', 'Two', 'one', 1000, 1, 0, NULL, 1, 1, 1)"
             )
         )
         uow.commit()
@@ -81,6 +78,6 @@ def test_failed_uow_commit_is_atomic_across_a_new_physical_connection(applicatio
     fresh_engine = create_sqlite_engine(app_config.database.path)
     try:
         with fresh_engine.connect() as connection:
-            assert connection.scalar(text("SELECT count(*) FROM tags")) == 0
+            assert connection.scalar(text("SELECT count(*) FROM timer_presets")) == 0
     finally:
         fresh_engine.dispose()

@@ -9,7 +9,6 @@ import pytest
 
 from productivity_app.core.events import DomainEvent
 from productivity_app.core.exceptions import (
-    ActiveTimerConflictError,
     InvalidStateTransitionError,
     StaleVersionError,
 )
@@ -76,7 +75,7 @@ def _race(left: Callable[[], object], right: Callable[[], object]) -> tuple[obje
         barrier.wait()
         try:
             return operation()
-        except (ActiveTimerConflictError, InvalidStateTransitionError, StaleVersionError) as exc:
+        except (InvalidStateTransitionError, StaleVersionError) as exc:
             return exc
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -85,24 +84,28 @@ def _race(left: Callable[[], object], right: Callable[[], object]) -> tuple[obje
 
 
 def _assert_active_invariants(app_config) -> None:
+    """Several timers may be active, but each active timer owns exactly one open run."""
     assert (
         _rows(
             app_config,
-            "SELECT count(*) FROM timers WHERE deleted_at_utc IS NULL AND state IN ('RUNNING','PAUSED')",
+            "SELECT count(*) FROM timers t WHERE t.deleted_at_utc IS NULL "
+            "AND t.state IN ('RUNNING','PAUSED') AND "
+            "(SELECT count(*) FROM timer_runs r WHERE r.timer_id=t.id AND r.ended_at_utc IS NULL) != 1",
         )[0][0]
-        <= 1
+        == 0
     )
     assert (
         _rows(
             app_config,
             "SELECT count(*) FROM timer_runs r JOIN timers t ON t.id=r.timer_id "
-            "WHERE r.ended_at_utc IS NULL AND t.deleted_at_utc IS NULL",
+            "WHERE r.ended_at_utc IS NULL AND t.deleted_at_utc IS NULL "
+            "AND t.state NOT IN ('RUNNING','PAUSED')",
         )[0][0]
-        <= 1
+        == 0
     )
 
 
-def test_start_vs_start_has_one_exact_winner(application, app_config) -> None:
+def test_start_vs_start_both_timers_run(application, app_config) -> None:
     first = application.timers.create_timer(CreateTimer(name="A", planned_duration_ms=100))
     second = application.timers.create_timer(CreateTimer(name="B", planned_duration_ms=100))
     events = _watch(application)
@@ -110,19 +113,12 @@ def test_start_vs_start_has_one_exact_winner(application, app_config) -> None:
         lambda: application.timers.start_timer(first.id, first.version),
         lambda: application.timers.start_timer(second.id, second.version),
     )
-    winners = [result for result in results if not isinstance(result, Exception)]
-    losers = [result for result in results if isinstance(result, Exception)]
-    assert len(winners) == 1 and len(losers) == 1
-    assert isinstance(losers[0], ActiveTimerConflictError)
-    winner = winners[0]
-    assert winner.state == "RUNNING" and winner.version == 2
-    loser_id = second.id if winner.id == first.id else first.id
-    assert _rows(app_config, "SELECT state,version FROM timers WHERE id=:id", {"id": loser_id}) == [
-        ("READY", 1)
-    ]
-    assert [(event.event_type, event.entity_id) for event in events] == [
-        ("TIMER_STARTED", winner.id)
-    ]
+    assert not any(isinstance(result, Exception) for result in results)
+    assert all(result.state == "RUNNING" and result.version == 2 for result in results)
+    assert sorted((event.event_type, event.entity_id) for event in events) == sorted(
+        [("TIMER_STARTED", first.id), ("TIMER_STARTED", second.id)]
+    )
+    assert {timer.id for timer in application.timers.list_active_timers()} == {first.id, second.id}
     _assert_active_invariants(app_config)
 
 
@@ -137,17 +133,14 @@ def test_paused_resume_vs_competing_start(application, app_config) -> None:
         lambda: application.timers.start_timer(waiting.id, waiting.version),
     )
     assert not isinstance(resumed, Exception) and resumed.state == "RUNNING"
-    assert isinstance(started, ActiveTimerConflictError)
-    assert _rows(
-        app_config, "SELECT state,version FROM timers WHERE id=:id", {"id": waiting.id}
-    ) == [("READY", 1)]
-    assert [(event.event_type, event.entity_id) for event in events] == [
-        ("TIMER_RESUMED", active.id)
-    ]
+    assert not isinstance(started, Exception) and started.state == "RUNNING"
+    assert sorted((event.event_type, event.entity_id) for event in events) == sorted(
+        [("TIMER_RESUMED", active.id), ("TIMER_STARTED", waiting.id)]
+    )
     _assert_active_invariants(app_config)
 
 
-def test_reset_vs_start_has_only_valid_serial_outcomes(application, app_config) -> None:
+def test_reset_vs_start_both_succeed_in_either_order(application, app_config) -> None:
     active = application.timers.create_timer(CreateTimer(name="A", planned_duration_ms=100))
     waiting = application.timers.create_timer(CreateTimer(name="B", planned_duration_ms=100))
     active = application.timers.start_timer(active.id, active.version)
@@ -157,12 +150,8 @@ def test_reset_vs_start_has_only_valid_serial_outcomes(application, app_config) 
         lambda: application.timers.start_timer(waiting.id, waiting.version),
     )
     assert not isinstance(reset, Exception) and reset.state == "READY" and reset.version == 3
-    if isinstance(start, Exception):
-        assert isinstance(start, ActiveTimerConflictError)
-        assert [event.event_type for event in events] == ["TIMER_RESET"]
-    else:
-        assert start.state == "RUNNING" and start.version == 2
-        assert [event.event_type for event in events] == ["TIMER_RESET", "TIMER_STARTED"]
+    assert not isinstance(start, Exception) and start.state == "RUNNING" and start.version == 2
+    assert sorted(event.event_type for event in events) == ["TIMER_RESET", "TIMER_STARTED"]
     run = _rows(
         app_config,
         "SELECT ended_at_utc,outcome FROM timer_runs WHERE timer_id=:id",
@@ -244,7 +233,7 @@ def test_lifecycle_races_preserve_exact_single_mutation(
 
     def operation(name: str):
         if name == "reconcile":
-            return application.timers.reconcile_expired_timer()
+            return application.timers.reconcile_expired_timers()
         if name == "update":
             return application.timers.update_timer(
                 timer.id, UpdateTimer(expected_version=base_version, name="Won")
@@ -252,9 +241,7 @@ def test_lifecycle_races_preserve_exact_single_mutation(
         return getattr(application.timers, f"{name}_timer")(timer.id, base_version)
 
     results = _race(lambda: operation(left), lambda: operation(right))
-    successful = [
-        result for result in results if result is not None and not isinstance(result, Exception)
-    ]
+    successful = [result for result in results if result and not isinstance(result, Exception)]
     assert len(successful) == 1
     final = application.timers.get_timer(timer.id, include_deleted=True)
     assert final.version == base_version + 1

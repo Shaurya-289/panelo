@@ -17,6 +17,17 @@ class Theme(StrEnum):
     DARK = "DARK"
 
 
+class NotificationStyle(StrEnum):
+    TOAST = "TOAST"
+    WINDOWS = "WINDOWS"
+    BOTH = "BOTH"
+
+
+class FilesViewMode(StrEnum):
+    LIST = "LIST"
+    GRID = "GRID"
+
+
 class SettingsView(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -29,6 +40,19 @@ class SettingsView(BaseModel):
     pomodoro_work_duration_ms: int = Field(ge=1_000, le=86_400_000)
     short_break_duration_ms: int = Field(ge=1_000, le=86_400_000)
     long_break_duration_ms: int = Field(ge=1_000, le=86_400_000)
+    user_name: str = Field(max_length=60)
+    tour_done: bool
+    notification_style: NotificationStyle
+    notification_sound: str = Field(max_length=260)
+    backdrop_blur: int = Field(ge=0, le=100)
+    backdrop_dim: int = Field(ge=0, le=100)
+    overlay_size_pct: int = Field(ge=60, le=90)
+    overlay_layout_json: str
+    files_view_mode: FilesViewMode
+    library_path: str = Field(max_length=1024)
+    auto_backup: bool
+    keep_backups: int = Field(ge=1, le=60)
+    last_auto_backup_at_utc: datetime | None
     updated_at_utc: datetime
     version: int = Field(ge=1)
 
@@ -46,6 +70,18 @@ class SettingsPatch(BaseModel):
     pomodoro_work_duration_ms: int | None = Field(default=None, ge=1_000, le=86_400_000)
     short_break_duration_ms: int | None = Field(default=None, ge=1_000, le=86_400_000)
     long_break_duration_ms: int | None = Field(default=None, ge=1_000, le=86_400_000)
+    user_name: str | None = Field(default=None, max_length=60)
+    tour_done: bool | None = None
+    notification_style: NotificationStyle | None = None
+    notification_sound: str | None = Field(default=None, max_length=260)
+    backdrop_blur: int | None = Field(default=None, ge=0, le=100)
+    backdrop_dim: int | None = Field(default=None, ge=0, le=100)
+    overlay_size_pct: int | None = Field(default=None, ge=60, le=90)
+    overlay_layout_json: str | None = None
+    files_view_mode: FilesViewMode | None = None
+    library_path: str | None = Field(default=None, max_length=1024)
+    auto_backup: bool | None = None
+    keep_backups: int | None = Field(default=None, ge=1, le=60)
 
     @field_validator("global_hotkey")
     @classmethod

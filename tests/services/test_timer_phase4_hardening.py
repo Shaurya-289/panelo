@@ -11,7 +11,6 @@ from sqlalchemy.exc import IntegrityError
 
 from productivity_app.core.events import DomainEvent
 from productivity_app.core.exceptions import (
-    ActiveTimerConflictError,
     ConflictError,
     DuplicateNameError,
     InvalidStateTransitionError,
@@ -126,8 +125,8 @@ def test_expiry_reads_do_not_mutate_and_reconcile_closes_one_run(
         )
         == before
     )
-    reconciled = application.timers.reconcile_expired_timer()
-    assert reconciled is not None and reconciled.ended_at_utc == deadline
+    (reconciled,) = application.timers.reconcile_expired_timers()
+    assert reconciled.ended_at_utc == deadline
     epoch_deadline = datetime_to_epoch_microseconds(deadline)
     assert _fresh(
         app_config, "SELECT state,version,ended_at_utc FROM timers WHERE id=:id", {"id": timer.id}
@@ -138,7 +137,7 @@ def test_expiry_reads_do_not_mutate_and_reconcile_closes_one_run(
         {"id": timer.id},
     ) == [(1_000, epoch_deadline, "FINISHED")]
     assert [event.event_type for event in observed] == ["TIMER_COMPLETED"]
-    assert application.timers.reconcile_expired_timer() is None
+    assert application.timers.reconcile_expired_timers() == ()
     assert [event.event_type for event in observed] == ["TIMER_COMPLETED"]
 
 
@@ -159,7 +158,7 @@ def test_state_sort_uses_effective_expiry_state_and_deterministic_id_ties(
     finished = application.timers.create_timer(CreateTimer(name="Finished", planned_duration_ms=1))
     application.timers.start_timer(finished.id, finished.version)
     clock.now += timedelta(milliseconds=1)
-    application.timers.reconcile_expired_timer()
+    application.timers.reconcile_expired_timers()
     expired = application.timers.create_timer(CreateTimer(name="Expired", planned_duration_ms=1))
     application.timers.start_timer(expired.id, expired.version)
     clock.now += timedelta(milliseconds=1)
@@ -174,7 +173,7 @@ def test_state_sort_uses_effective_expiry_state_and_deterministic_id_ties(
     assert expired_view.state == "RUNNING" and expired_view.effective_state == "FINISHED"
 
 
-def test_start_race_leaves_one_active_timer_and_one_open_run(application, app_config) -> None:
+def test_start_race_runs_both_timers_with_one_open_run_each(application, app_config) -> None:
     first = application.timers.create_timer(CreateTimer(name="First", planned_duration_ms=1_000))
     second = application.timers.create_timer(CreateTimer(name="Second", planned_duration_ms=1_000))
     barrier = Barrier(2)
@@ -182,26 +181,23 @@ def test_start_race_leaves_one_active_timer_and_one_open_run(application, app_co
 
     def start(timer):
         barrier.wait()
-        try:
-            return application.timers.start_timer(timer.id, timer.version)
-        except ActiveTimerConflictError as exc:
-            return exc
+        return application.timers.start_timer(timer.id, timer.version)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = [
             future.result()
             for future in (executor.submit(start, first), executor.submit(start, second))
         ]
-    assert sum(not isinstance(result, Exception) for result in results) == 1
-    assert sum(isinstance(result, ActiveTimerConflictError) for result in results) == 1
+    assert all(result.state == "RUNNING" for result in results)
     assert _fresh(
         app_config,
         "SELECT count(*) FROM timers WHERE deleted_at_utc IS NULL AND state IN ('RUNNING','PAUSED')",
-    ) == [(1,)]
-    assert _fresh(app_config, "SELECT count(*) FROM timer_runs WHERE ended_at_utc IS NULL") == [
-        (1,)
-    ]
-    assert [event.event_type for event in observed] == ["TIMER_STARTED"]
+    ) == [(2,)]
+    assert _fresh(
+        app_config,
+        "SELECT count(DISTINCT timer_id), count(*) FROM timer_runs WHERE ended_at_utc IS NULL",
+    ) == [(2, 2)]
+    assert sorted(event.event_type for event in observed) == ["TIMER_STARTED", "TIMER_STARTED"]
 
 
 @pytest.mark.parametrize("operation", ("pause", "complete", "cancel", "reset"))
@@ -298,7 +294,6 @@ def test_subscriber_failure_does_not_undo_committed_timer_run(
 
 def test_timer_integrity_translation_is_narrow() -> None:
     for message, expected in (
-        ("UNIQUE constraint failed: index 'ux_timers_one_active'", ActiveTimerConflictError),
         ("UNIQUE constraint failed: timer_runs.timer_id", ConflictError),
         ("UNIQUE constraint failed: timer_presets.normalized_name", DuplicateNameError),
         ("UNIQUE constraint failed: timer_presets.sort_order", ConflictError),
@@ -464,7 +459,7 @@ def test_resume_and_reconcile_post_mutation_failures_rollback_everything(
         if operation == "resume":
             application.timers.resume_timer(timer.id, current.version)
         else:
-            application.timers.reconcile_expired_timer()
+            application.timers.reconcile_expired_timers()
     assert _fresh(app_config, "SELECT * FROM timers WHERE id=:id", {"id": timer.id}) == before_timer
     assert (
         _fresh(app_config, "SELECT * FROM timer_runs WHERE timer_id=:id", {"id": timer.id})

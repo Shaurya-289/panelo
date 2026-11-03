@@ -1,4 +1,4 @@
-"""Focus sequence/session mappings; initial schema mappings remain immutable.
+"""Focus sequence/session mappings.
 
 NOTE: these tables hold foreign keys to tables mapped in ``initial`` but no ORM
 relationships, so SQLAlchemy orders inserts by ``module.ClassName``. Keep this module

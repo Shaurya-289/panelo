@@ -39,3 +39,13 @@ class SettingsRepository:
         if result.rowcount != 1:
             return None
         return self.get()
+
+    def record_auto_backup(self, at_utc: datetime) -> None:
+        """Note when the last automatic backup ran.
+
+        Bookkeeping, not a user edit: it neither bumps the settings version (so a cached
+        copy a user is editing stays current) nor changes ``updated_at_utc``.
+        """
+        self._session.execute(
+            update(AppSettings).where(AppSettings.id == 1).values(last_auto_backup_at_utc=at_utc)
+        )

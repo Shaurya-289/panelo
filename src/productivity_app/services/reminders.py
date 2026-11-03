@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import IntegrityError
 
@@ -12,12 +13,23 @@ from productivity_app.core.clock import Clock
 from productivity_app.core.events import DomainEvent
 from productivity_app.core.exceptions import (
     ConflictError,
+    DatabaseCorruptionError,
     InvalidStateTransitionError,
     NotFoundError,
     StaleVersionError,
     ValidationError,
 )
 from productivity_app.core.ids import IdGenerator, Uuid4Generator
+from productivity_app.core.recurrence import (
+    RepeatKind,
+    RepeatRule,
+    RepeatUnit,
+    advance,
+    align_due,
+    days_to_mask,
+    describe,
+    mask_to_days,
+)
 from productivity_app.db.models.initial import Reminder, ReminderEvent
 from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWorkFactory
 from productivity_app.schemas.reminders import (
@@ -25,6 +37,7 @@ from productivity_app.schemas.reminders import (
     ReminderEventView,
     ReminderPageQuery,
     ReminderQuery,
+    ReminderRepeat,
     ReminderStatusValue,
     ReminderSummary,
     ReminderTimingValue,
@@ -42,6 +55,9 @@ _REMINDER_CHECKS = frozenset(
         "ck_reminders_snooze_count",
         "ck_reminders_status_values",
         "ck_reminders_terminal_timestamps",
+        "ck_reminders_repeat_kind_values",
+        "ck_reminders_repeat_unit_values",
+        "ck_reminders_repeat_shape",
     }
 )
 
@@ -68,7 +84,52 @@ def _timing_state(reminder: Reminder, now: datetime) -> ReminderTimingValue | No
     return "OVERDUE"
 
 
-def _summary(reminder: Reminder, now: datetime) -> ReminderSummary:
+def _rule(reminder: Reminder) -> RepeatRule | None:
+    """The repeat rule stored in the reminder's columns (``None`` for a one-time reminder)."""
+    if reminder.repeat_kind is None:
+        return None
+    return RepeatRule(
+        kind=cast(RepeatKind, reminder.repeat_kind),
+        days=mask_to_days(reminder.repeat_days) if reminder.repeat_days is not None else (),
+        day_of_month=reminder.repeat_day_of_month,
+        every_n=reminder.repeat_every_n,
+        every_unit=cast(RepeatUnit | None, reminder.repeat_every_unit),
+    )
+
+
+def _rule_from_schema(repeat: ReminderRepeat) -> RepeatRule:
+    return RepeatRule(
+        kind=repeat.kind,
+        days=repeat.days,
+        day_of_month=repeat.day_of_month,
+        every_n=repeat.every_n,
+        every_unit=repeat.every_unit,
+    )
+
+
+def _repeat_columns(rule: RepeatRule | None) -> dict[str, object]:
+    """The repeat columns that encode ``rule`` (all ``None`` for no rule)."""
+    return {
+        "repeat_kind": rule.kind if rule else None,
+        "repeat_days": days_to_mask(rule.days) if rule and rule.days else None,
+        "repeat_day_of_month": rule.day_of_month if rule else None,
+        "repeat_every_n": rule.every_n if rule else None,
+        "repeat_every_unit": rule.every_unit if rule else None,
+    }
+
+
+def _repeat_view(rule: RepeatRule) -> ReminderRepeat:
+    return ReminderRepeat(
+        kind=rule.kind,
+        days=rule.days,
+        day_of_month=rule.day_of_month,
+        every_n=rule.every_n,
+        every_unit=rule.every_unit,
+    )
+
+
+def _summary(reminder: Reminder, now: datetime, times_done: int = 0) -> ReminderSummary:
+    rule = _rule(reminder)
     return ReminderSummary(
         id=reminder.id,
         title=reminder.title,
@@ -83,15 +144,24 @@ def _summary(reminder: Reminder, now: datetime) -> ReminderSummary:
         completed_at_utc=reminder.completed_at_utc,
         cancelled_at_utc=reminder.cancelled_at_utc,
         snooze_count=reminder.snooze_count,
+        repeat=_repeat_view(rule) if rule else None,
+        repeat_description=(
+            describe(rule, reminder.anchor_at_utc, ZoneInfo(reminder.scheduled_timezone))
+            if rule
+            else None
+        ),
+        anchor_at_utc=reminder.anchor_at_utc,
+        times_done=times_done,
         created_at_utc=reminder.created_at_utc,
         updated_at_utc=reminder.updated_at_utc,
         version=reminder.version,
-        deleted_at_utc=reminder.deleted_at_utc,
     )
 
 
-def _view(reminder: Reminder, now: datetime) -> ReminderView:
-    return ReminderView(**_summary(reminder, now).model_dump(), message=reminder.message)
+def _view(reminder: Reminder, now: datetime, times_done: int = 0) -> ReminderView:
+    return ReminderView(
+        **_summary(reminder, now, times_done).model_dump(), message=reminder.message
+    )
 
 
 def _event_view(event: ReminderEvent) -> ReminderEventView:
@@ -177,18 +247,11 @@ class ReminderService:
         return reminder
 
     @staticmethod
-    def _active_reminder(uow: SqlAlchemyUnitOfWork, reminder_id: str) -> Reminder:
-        reminder = ReminderService._existing(uow, reminder_id)
-        if reminder.deleted_at_utc is not None:
-            raise NotFoundError("Reminder was not found.")
-        return reminder
-
-    @staticmethod
     def _claim(
-        uow: SqlAlchemyUnitOfWork, reminder: Reminder, expected_version: int, now: datetime, *, deleted: bool
+        uow: SqlAlchemyUnitOfWork, reminder: Reminder, expected_version: int, now: datetime
     ) -> None:
         assert uow.reminders is not None
-        if not uow.reminders.claim_version(reminder.id, expected_version, now, deleted=deleted):
+        if not uow.reminders.claim_version(reminder.id, expected_version, now):
             raise StaleVersionError("Reminder changed; refresh and retry.")
 
     @staticmethod
@@ -211,8 +274,37 @@ class ReminderService:
         if reminder.status in {"TRIGGERED", "OVERDUE"}:
             reminder.status = "PENDING"
 
+    @staticmethod
+    def _aligned_due(rule: RepeatRule, due: datetime, timezone: str) -> datetime:
+        """The first valid occurrence of ``rule`` at or after ``due``."""
+        aligned = align_due(rule, due, ZoneInfo(timezone))
+        if aligned is None:
+            raise ValidationError("The repeat rule has no valid occurrence.")
+        return aligned
+
+    @staticmethod
+    def _times_done(uow: SqlAlchemyUnitOfWork, reminder_ids: Sequence[str]) -> dict[str, int]:
+        assert uow.reminders is not None
+        counts = uow.reminders.completion_counts(reminder_ids)
+        return {reminder_id: counts.get(reminder_id, 0) for reminder_id in reminder_ids}
+
+    def _view_of(self, uow: SqlAlchemyUnitOfWork, reminder: Reminder, now: datetime) -> ReminderView:
+        return _view(reminder, now, self._times_done(uow, [reminder.id])[reminder.id])
+
+    def _summaries(
+        self, uow: SqlAlchemyUnitOfWork, reminders: Sequence[Reminder], now: datetime
+    ) -> tuple[ReminderSummary, ...]:
+        counts = self._times_done(uow, [reminder.id for reminder in reminders])
+        return tuple(_summary(reminder, now, counts[reminder.id]) for reminder in reminders)
+
     def create_reminder(self, command: CreateReminder) -> ReminderView:
         now = self._clock.now_utc()
+        rule = _rule_from_schema(command.repeat) if command.repeat else None
+        due = (
+            self._aligned_due(rule, command.due_at_utc, command.scheduled_timezone)
+            if rule
+            else command.due_at_utc
+        )
         with self._uows() as uow:
             assert uow.reminders is not None
             uow.acquire_write_lock()
@@ -222,7 +314,7 @@ class ReminderService:
                 id=self._ids.new(),
                 title=command.title,
                 message=command.message,
-                due_at_utc=command.due_at_utc,
+                due_at_utc=due,
                 scheduled_timezone=command.scheduled_timezone,
                 status="PENDING",
                 task_id=command.task_id,
@@ -232,7 +324,8 @@ class ReminderService:
                 completed_at_utc=None,
                 cancelled_at_utc=None,
                 snooze_count=0,
-                deleted_at_utc=None,
+                anchor_at_utc=due if rule else None,
+                **_repeat_columns(rule),
                 created_at_utc=now,
                 updated_at_utc=now,
                 version=1,
@@ -244,66 +337,89 @@ class ReminderService:
             self._commit(uow)
             return _view(reminder, now)
 
-    def get_reminder(self, reminder_id: str, *, include_deleted: bool = False) -> ReminderView:
+    def get_reminder(self, reminder_id: str) -> ReminderView:
         now = self._clock.now_utc()
         with self._uows() as uow:
-            reminder = self._existing(uow, reminder_id)
-            if reminder.deleted_at_utc is not None and not include_deleted:
-                raise NotFoundError("Reminder was not found.")
-            return _view(reminder, now)
+            return self._view_of(uow, self._existing(uow, reminder_id), now)
 
     def update_reminder(self, reminder_id: str, patch: UpdateReminder) -> ReminderView:
-        values = patch.model_dump(exclude={"expected_version"}, exclude_unset=True)
-        if not values:
+        values = patch.model_dump(exclude={"expected_version", "repeat"}, exclude_unset=True)
+        repeat_given = "repeat" in patch.model_fields_set
+        if not values and not repeat_given:
             raise ValidationError("Reminder update must include at least one field.")
-        if any(values.get(key) is None for key in ("title", "message", "due_at_utc", "scheduled_timezone") if key in values):
+        if any(
+            values.get(key) is None
+            for key in ("title", "message", "due_at_utc", "scheduled_timezone")
+            if key in values
+        ):
             raise ValidationError("Reminder title, message, due time, and timezone cannot be null.")
         now = self._clock.now_utc()
         with self._uows() as uow:
             uow.acquire_write_lock()
-            reminder = self._active_reminder(uow, reminder_id)
+            reminder = self._existing(uow, reminder_id)
             if reminder.status not in _ACTIVE:
                 raise InvalidStateTransitionError("Terminal reminders must be reopened before editing.")
             final_task = values.get("task_id", reminder.task_id)
             final_note = values.get("note_id", reminder.note_id)
             if final_task is not None and final_note is not None:
                 raise ValidationError("A reminder may link to either a task or a note, not both.")
-            if (
-                "task_id" in values
-                and final_task is not None
-                and final_task != reminder.task_id
-            ):
+            if "task_id" in values and final_task is not None and final_task != reminder.task_id:
                 self._active_task(uow, final_task)
-            if (
-                "note_id" in values
-                and final_note is not None
-                and final_note != reminder.note_id
-            ):
+            if "note_id" in values and final_note is not None and final_note != reminder.note_id:
                 self._active_note(uow, final_note)
-            changed = any(getattr(reminder, key) != value for key, value in values.items())
+            changes = self._changes(reminder, values, patch.repeat, repeat_given)
+            changed = any(getattr(reminder, key) != value for key, value in changes.items())
             if not changed and reminder.status == "PENDING":
                 raise ValidationError("Reminder update does not change any fields.")
             previous_status, old_due = reminder.status, reminder.due_at_utc
-            self._claim(uow, reminder, patch.expected_version, now, deleted=False)
-            for key, value in values.items():
+            self._claim(uow, reminder, patch.expected_version, now)
+            for key, value in changes.items():
                 setattr(reminder, key, value)
             self._canonicalize_active(reminder)
             self._audit_event(uow, "REMINDER_UPDATED", reminder, now, previous_status, old_due)
             self._domain_event(uow, "REMINDER_UPDATED", reminder, now)
             self._commit(uow)
-            return _view(reminder, now)
+            return self._view_of(uow, reminder, now)
+
+    def _changes(
+        self,
+        reminder: Reminder,
+        values: dict[str, object],
+        repeat: ReminderRepeat | None,
+        repeat_given: bool,
+    ) -> dict[str, object]:
+        """The column values an update leaves the reminder with.
+
+        Setting a rule moves the due time to the next valid occurrence at or after it, and
+        the result is the new anchor.  Changing only the due time of a repeating reminder
+        makes the new time the anchor.
+        """
+        changes = dict(values)
+        due = cast(datetime, values.get("due_at_utc", reminder.due_at_utc))
+        if repeat_given:
+            rule = _rule_from_schema(repeat) if repeat else None
+            changes.update(_repeat_columns(rule))
+            if rule is not None:
+                timezone = cast(str, values.get("scheduled_timezone", reminder.scheduled_timezone))
+                due = self._aligned_due(rule, due, timezone)
+                changes["due_at_utc"] = due
+            changes["anchor_at_utc"] = due if rule is not None else None
+        elif reminder.repeat_kind is not None and "due_at_utc" in values:
+            changes["anchor_at_utc"] = due
+        return changes
 
     def snooze_reminder(self, reminder_id: str, command: SnoozeReminder) -> ReminderView:
+        """Move the due time; a repeat rule's anchor stays where it was."""
         now = self._clock.now_utc()
         with self._uows() as uow:
             uow.acquire_write_lock()
-            reminder = self._active_reminder(uow, reminder_id)
+            reminder = self._existing(uow, reminder_id)
             if reminder.status not in _ACTIVE or reminder.due_at_utc > now:
                 raise InvalidStateTransitionError("Only due or overdue reminders may be snoozed.")
             if command.due_at_utc <= now:
                 raise ValidationError("Snoozed reminders must be scheduled in the future.")
             previous_status, old_due = reminder.status, reminder.due_at_utc
-            self._claim(uow, reminder, command.expected_version, now, deleted=False)
+            self._claim(uow, reminder, command.expected_version, now)
             reminder.due_at_utc = command.due_at_utc
             if command.scheduled_timezone is not None:
                 reminder.scheduled_timezone = command.scheduled_timezone
@@ -312,7 +428,7 @@ class ReminderService:
             self._audit_event(uow, "REMINDER_SNOOZED", reminder, now, previous_status, old_due)
             self._domain_event(uow, "REMINDER_SNOOZED", reminder, now)
             self._commit(uow)
-            return _view(reminder, now)
+            return self._view_of(uow, reminder, now)
 
     def _transition(
         self,
@@ -325,27 +441,63 @@ class ReminderService:
         now = self._clock.now_utc()
         with self._uows() as uow:
             uow.acquire_write_lock()
-            reminder = self._active_reminder(uow, reminder_id)
+            reminder = self._existing(uow, reminder_id)
             if reminder.status not in required:
                 raise InvalidStateTransitionError(
                     "Reminder cannot make that transition from its current state."
                 )
             previous_status, old_due = reminder.status, reminder.due_at_utc
-            self._claim(uow, reminder, expected_version, now, deleted=False)
+            self._claim(uow, reminder, expected_version, now)
             apply(reminder, now)
             self._audit_event(uow, event_type, reminder, now, previous_status, old_due)
             self._domain_event(uow, event_type, reminder, now)
             self._commit(uow)
-            return _view(reminder, now)
+            return self._view_of(uow, reminder, now)
 
     def complete_reminder(self, reminder_id: str, expected_version: int) -> ReminderView:
-        def apply(reminder: Reminder, now: datetime) -> None:
-            reminder.status = "COMPLETED"
-            reminder.completed_at_utc = now
-            reminder.dismissed_at_utc = None
-            reminder.cancelled_at_utc = None
+        """Finish a one-time reminder; advance a repeating one to its next occurrence.
 
-        return self._transition(reminder_id, expected_version, "REMINDER_COMPLETED", _ACTIVE, apply)
+        A repeating reminder stays ``PENDING``: its due time and anchor become the next
+        occurrence (strictly in the future and after the current due time, skipping any that
+        were missed) and its snoozes are forgotten.  A ``COMPLETED_OCCURRENCE`` audit event
+        records the completion (it is what ``times_done`` counts).
+        """
+        now = self._clock.now_utc()
+        with self._uows() as uow:
+            uow.acquire_write_lock()
+            reminder = self._existing(uow, reminder_id)
+            if reminder.status not in _ACTIVE:
+                raise InvalidStateTransitionError(
+                    "Reminder cannot make that transition from its current state."
+                )
+            previous_status, old_due = reminder.status, reminder.due_at_utc
+            self._claim(uow, reminder, expected_version, now)
+            rule = _rule(reminder)
+            if rule is None:
+                reminder.status = "COMPLETED"
+                reminder.completed_at_utc = now
+                reminder.dismissed_at_utc = None
+                reminder.cancelled_at_utc = None
+                audit_type = "REMINDER_COMPLETED"
+            else:
+                following = advance(
+                    rule,
+                    reminder.due_at_utc,
+                    reminder.anchor_at_utc,
+                    now,
+                    ZoneInfo(reminder.scheduled_timezone),
+                )
+                if following is None:
+                    raise DatabaseCorruptionError("A repeating reminder has no next occurrence.")
+                reminder.status = "PENDING"
+                reminder.due_at_utc = following
+                reminder.anchor_at_utc = following
+                reminder.snooze_count = 0
+                audit_type = "COMPLETED_OCCURRENCE"
+            self._audit_event(uow, audit_type, reminder, now, previous_status, old_due)
+            self._domain_event(uow, "REMINDER_COMPLETED", reminder, now)
+            self._commit(uow)
+            return self._view_of(uow, reminder, now)
 
     def dismiss_reminder(self, reminder_id: str, expected_version: int) -> ReminderView:
         def apply(reminder: Reminder, now: datetime) -> None:
@@ -375,74 +527,55 @@ class ReminderService:
         return self._transition(reminder_id, expected_version, "REMINDER_REOPENED", _TERMINAL, apply)
 
     def delete_reminder(self, reminder_id: str, expected_version: int) -> ReminderView:
+        """Delete permanently (reminders have no Trash); returns the reminder as it was."""
         now = self._clock.now_utc()
         with self._uows() as uow:
-            uow.acquire_write_lock()
-            reminder = self._active_reminder(uow, reminder_id)
-            previous_status, old_due = reminder.status, reminder.due_at_utc
-            self._claim(uow, reminder, expected_version, now, deleted=False)
-            reminder.deleted_at_utc = now
-            self._audit_event(uow, "REMINDER_DELETED", reminder, now, previous_status, old_due)
-            self._domain_event(uow, "REMINDER_DELETED", reminder, now)
-            self._commit(uow)
-            return _view(reminder, now)
-
-    def restore_reminder(self, reminder_id: str, expected_version: int) -> ReminderView:
-        now = self._clock.now_utc()
-        with self._uows() as uow:
+            assert uow.reminders is not None
             uow.acquire_write_lock()
             reminder = self._existing(uow, reminder_id)
-            if reminder.deleted_at_utc is None:
-                raise NotFoundError("Deleted reminder was not found.")
-            previous_status, old_due = reminder.status, reminder.due_at_utc
-            self._claim(uow, reminder, expected_version, now, deleted=True)
-            reminder.deleted_at_utc = None
-            self._canonicalize_active(reminder)
-            self._audit_event(uow, "REMINDER_RESTORED", reminder, now, previous_status, old_due)
-            self._domain_event(uow, "REMINDER_RESTORED", reminder, now)
+            self._claim(uow, reminder, expected_version, now)
+            view = self._view_of(uow, reminder, now)
+            uow.reminders.delete(reminder.id)
+            self._domain_event(uow, "REMINDER_DELETED", reminder, now)
             self._commit(uow)
-            return _view(reminder, now)
+            return view
 
     def list_reminders(self, query: ReminderQuery | None = None) -> tuple[ReminderSummary, ...]:
         data, now = query or ReminderQuery(), self._clock.now_utc()
         with self._uows() as uow:
             assert uow.reminders is not None
-            return tuple(_summary(reminder, now) for reminder in uow.reminders.list_reminders(data, now))
+            return self._summaries(uow, uow.reminders.list_reminders(data, now), now)
 
     def list_upcoming(self, query: ReminderPageQuery | None = None) -> tuple[ReminderSummary, ...]:
         data, now = query or ReminderPageQuery(), self._clock.now_utc()
         with self._uows() as uow:
             assert uow.reminders is not None
-            return tuple(
-                _summary(reminder, now)
-                for reminder in uow.reminders.list_upcoming(now, limit=data.limit, offset=data.offset)
+            return self._summaries(
+                uow, uow.reminders.list_upcoming(now, limit=data.limit, offset=data.offset), now
             )
 
     def list_due(self, query: ReminderPageQuery | None = None) -> tuple[ReminderSummary, ...]:
         data, now = query or ReminderPageQuery(), self._clock.now_utc()
         with self._uows() as uow:
             assert uow.reminders is not None
-            return tuple(
-                _summary(reminder, now)
-                for reminder in uow.reminders.list_due(now, limit=data.limit, offset=data.offset)
+            return self._summaries(
+                uow, uow.reminders.list_due(now, limit=data.limit, offset=data.offset), now
             )
 
     def list_overdue(self, query: ReminderPageQuery | None = None) -> tuple[ReminderSummary, ...]:
         data, now = query or ReminderPageQuery(), self._clock.now_utc()
         with self._uows() as uow:
             assert uow.reminders is not None
-            return tuple(
-                _summary(reminder, now)
-                for reminder in uow.reminders.list_overdue(now, limit=data.limit, offset=data.offset)
+            return self._summaries(
+                uow, uow.reminders.list_overdue(now, limit=data.limit, offset=data.offset), now
             )
 
     def list_history(self, query: ReminderPageQuery | None = None) -> tuple[ReminderSummary, ...]:
         data, now = query or ReminderPageQuery(), self._clock.now_utc()
         with self._uows() as uow:
             assert uow.reminders is not None
-            return tuple(
-                _summary(reminder, now)
-                for reminder in uow.reminders.list_history(limit=data.limit, offset=data.offset)
+            return self._summaries(
+                uow, uow.reminders.list_history(limit=data.limit, offset=data.offset), now
             )
 
     def list_reminder_events(
@@ -454,5 +587,7 @@ class ReminderService:
             self._existing(uow, reminder_id)
             return tuple(
                 _event_view(event)
-                for event in uow.reminders.list_events(reminder_id, limit=data.limit, offset=data.offset)
+                for event in uow.reminders.list_events(
+                    reminder_id, limit=data.limit, offset=data.offset
+                )
             )

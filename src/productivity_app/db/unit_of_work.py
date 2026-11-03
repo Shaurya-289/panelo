@@ -14,12 +14,10 @@ from productivity_app.core.events import DomainEvent, InProcessEventBus
 from productivity_app.core.exceptions import DatabaseBusyError
 from productivity_app.core.lifecycle import ApplicationLifecycleGate, _Lease
 from productivity_app.repositories.focus import FocusRepository
-from productivity_app.repositories.folders import FolderRepository
 from productivity_app.repositories.notes import NoteRepository
 from productivity_app.repositories.reminders import ReminderRepository
 from productivity_app.repositories.search import SearchRepository
 from productivity_app.repositories.settings import SettingsRepository
-from productivity_app.repositories.tags import TagRepository
 from productivity_app.repositories.tasks import TaskRepository
 from productivity_app.repositories.timers import TimerRepository
 
@@ -60,8 +58,6 @@ class SqlAlchemyUnitOfWork:
         self._raw_session: Session | None = None
         self.session: _LifecycleSession | None = None
         self.settings: SettingsRepository | None = None
-        self.folders: FolderRepository | None = None
-        self.tags: TagRepository | None = None
         self.notes: NoteRepository | None = None
         self.tasks: TaskRepository | None = None
         self.reminders: ReminderRepository | None = None
@@ -82,8 +78,6 @@ class SqlAlchemyUnitOfWork:
             self._raw_session = self._session_factory()
             self.session = _LifecycleSession(self._raw_session, self._lifecycle_lease)
             self.settings = SettingsRepository(self.session)  # type: ignore[arg-type]
-            self.folders = FolderRepository(self.session)  # type: ignore[arg-type]
-            self.tags = TagRepository(self.session)  # type: ignore[arg-type]
             self.notes = NoteRepository(self.session)  # type: ignore[arg-type]
             self.tasks = TaskRepository(self.session)  # type: ignore[arg-type]
             self.reminders = ReminderRepository(self.session)  # type: ignore[arg-type]
@@ -117,8 +111,6 @@ class SqlAlchemyUnitOfWork:
                 self.session = None
                 self._raw_session = None
                 self.settings = None
-                self.folders = None
-                self.tags = None
                 self.notes = None
                 self.tasks = None
                 self.reminders = None

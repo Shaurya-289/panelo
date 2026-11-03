@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import sqlite3
 import stat
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, cast
 
@@ -34,20 +35,21 @@ from productivity_app.schemas.backups import (
     DeleteBackup,
     ValidateBackup,
 )
+from productivity_app.services.settings import SettingsService
 
-_REVISION: Final = "20261002_0002"
+_REVISION: Final = "20261103_0003"
+_AUTO_BACKUP_INTERVAL: Final = timedelta(hours=24)
+_LOGGER = logging.getLogger(__name__)
+_KINDS: Final = {"manual": "MANUAL", "auto": "AUTO", "pre-restore": "PRE_RESTORE"}
 _FILENAME = re.compile(
-    r"^productivity-backup-(?P<stamp>\d{8}T\d{6}\.\d{6}Z)-(?P<suffix>[0-9a-f]{12})-(?P<kind>manual|pre-restore)\.sqlite3$"
+    r"^productivity-backup-(?P<stamp>\d{8}T\d{6}\.\d{6}Z)-(?P<suffix>[0-9a-f]{12})-(?P<kind>manual|auto|pre-restore)\.sqlite3$"
 )
 _EXPECTED_COLUMNS: Final[dict[str, set[str]]] = {
     "alembic_version": {"version_num"},
-    "app_settings": {"id", "theme", "global_hotkey", "start_with_windows", "minimize_to_tray", "notifications_enabled", "default_timer_duration_ms", "pomodoro_work_duration_ms", "short_break_duration_ms", "long_break_duration_ms", "updated_at_utc", "version"},
-    "folders": {"id", "name", "normalized_name", "parent_id", "sort_order", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
-    "tags": {"id", "name", "normalized_name", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
-    "notes": {"id", "title", "content", "content_format", "folder_id", "is_pinned", "is_archived", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
-    "tasks": {"id", "title", "description", "status", "priority", "folder_id", "start_at_utc", "due_at_utc", "completed_at_utc", "cancelled_at_utc", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
-    "note_tags": {"note_id", "tag_id"}, "task_tags": {"task_id", "tag_id"},
-    "reminders": {"id", "title", "message", "due_at_utc", "scheduled_timezone", "status", "task_id", "note_id", "last_triggered_at_utc", "dismissed_at_utc", "completed_at_utc", "cancelled_at_utc", "snooze_count", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
+    "app_settings": {"id", "theme", "global_hotkey", "start_with_windows", "minimize_to_tray", "notifications_enabled", "default_timer_duration_ms", "pomodoro_work_duration_ms", "short_break_duration_ms", "long_break_duration_ms", "updated_at_utc", "version", "user_name", "tour_done", "notification_style", "notification_sound", "backdrop_blur", "backdrop_dim", "overlay_size_pct", "overlay_layout_json", "files_view_mode", "library_path", "auto_backup", "keep_backups", "last_auto_backup_at_utc"},
+    "notes": {"id", "title", "content", "content_format", "is_pinned", "is_archived", "color", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
+    "tasks": {"id", "title", "description", "status", "priority", "start_at_utc", "due_at_utc", "due_has_time", "completed_at_utc", "cancelled_at_utc", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
+    "reminders": {"id", "title", "message", "due_at_utc", "scheduled_timezone", "status", "task_id", "note_id", "last_triggered_at_utc", "dismissed_at_utc", "completed_at_utc", "cancelled_at_utc", "snooze_count", "repeat_kind", "repeat_days", "repeat_day_of_month", "repeat_every_n", "repeat_every_unit", "anchor_at_utc", "created_at_utc", "updated_at_utc", "version"},
     "reminder_events": {"id", "reminder_id", "event_type", "occurred_at_utc", "previous_status", "new_status", "old_due_at_utc", "new_due_at_utc", "metadata_json"},
     "timer_presets": {"id", "name", "normalized_name", "duration_ms", "sort_order", "is_builtin", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
     "timers": {"id", "name", "preset_id", "task_id", "state", "planned_duration_ms", "elapsed_before_run_ms", "run_started_at_utc", "deadline_at_utc", "first_started_at_utc", "ended_at_utc", "created_at_utc", "updated_at_utc", "version", "deleted_at_utc"},
@@ -85,7 +87,16 @@ class _ValidatedBackup:
 
 
 class BackupService:
-    def __init__(self, database_path: Path, busy_timeout_ms: int, clock: Clock, ids: IdGenerator, gate: ApplicationLifecycleGate) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        busy_timeout_ms: int,
+        clock: Clock,
+        ids: IdGenerator,
+        gate: ApplicationLifecycleGate,
+        settings: SettingsService | None = None,
+    ) -> None:
+        self._settings = settings
         self._database_path = database_path.resolve()
         self._busy_timeout_ms = busy_timeout_ms
         self._clock = clock
@@ -100,6 +111,46 @@ class BackupService:
     def create_backup(self) -> BackupValidationView:
         with self._gate.operation():
             return self._create_backup("MANUAL")
+
+    def run_auto_backup_if_due(self, now: datetime | None = None) -> BackupValidationView | None:
+        """Back up when automatic backups are on and the last one is over 24 hours old.
+
+        Records the time, then prunes the backup directory to the newest ``keep_backups``
+        files.  Manual and safety backups count toward that limit (the Settings list shows
+        them all), but the backup just made is always kept.  Returns the new backup, or
+        ``None`` when nothing was due.
+        """
+        if self._settings is None:
+            raise BackupError("Automatic backups need the settings service.")
+        moment = (now or self._clock.now_utc()).astimezone(UTC)
+        settings = self._settings.get_settings()
+        last = settings.last_auto_backup_at_utc
+        if not settings.auto_backup or (
+            last is not None and last <= moment and moment - last <= _AUTO_BACKUP_INTERVAL
+        ):
+            return None
+        with self._gate.operation():
+            created = self._create_backup("AUTO", moment)
+            self._settings.record_auto_backup(moment)
+            self._prune(settings.keep_backups, keep_name=created.filename)
+        return created
+
+    def _prune(self, keep: int, *, keep_name: str) -> None:
+        """Delete the oldest managed backups beyond the newest ``keep``."""
+        try:
+            entries = [
+                (parsed[0], path)
+                for path in self._backup_directory.iterdir()
+                if (parsed := self._parse_managed(path)) is not None and path.name != keep_name
+            ]
+        except OSError as exc:
+            raise BackupError("Could not list backup artifacts.") from exc
+        entries.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+        for _, path in entries[max(0, keep - 1) :]:
+            try:
+                path.unlink()
+            except OSError:
+                _LOGGER.warning("Could not delete old backup %s", path.name, exc_info=True)
 
     def list_backups(self, query: BackupPageQuery | None = None) -> tuple[BackupView, ...]:
         page = query or BackupPageQuery()
@@ -139,9 +190,9 @@ class BackupService:
             except OSError as exc:
                 raise BackupError("Could not delete backup.") from exc
 
-    def _create_backup(self, kind: str) -> BackupValidationView:
+    def _create_backup(self, kind: str, now: datetime | None = None) -> BackupValidationView:
         self._ensure_managed_directory(create=True)
-        now = self._clock.now_utc().astimezone(UTC)
+        now = (now or self._clock.now_utc()).astimezone(UTC)
         for _ in range(8):
             final = self._backup_directory / self._filename(now, kind)
             temp = self._backup_directory / f".{final.name}.{self._ids.new()}.partial"
@@ -485,13 +536,13 @@ class BackupService:
             timestamp = datetime.strptime(match.group("stamp"), "%Y%m%dT%H%M%S.%fZ").replace(tzinfo=UTC)
         except ValueError:
             return None
-        return timestamp, "MANUAL" if match.group("kind") == "manual" else "PRE_RESTORE"
+        return timestamp, _KINDS[match.group("kind")]
 
     def _filename(self, now: datetime, kind: str) -> str:
         stamp = now.strftime("%Y%m%dT%H%M%S.%fZ")
         suffix = self._ids.new().replace("-", "")[:12]
         suffix = suffix.lower().ljust(12, "0")
-        label = "manual" if kind == "MANUAL" else "pre-restore"
+        label = next(name for name, value in _KINDS.items() if value == kind)
         return f"productivity-backup-{stamp}-{suffix}-{label}.sqlite3"
 
     @staticmethod

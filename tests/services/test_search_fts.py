@@ -6,11 +6,9 @@ import pytest
 from sqlalchemy import text
 
 from productivity_app.repositories.search import SearchRepository
-from productivity_app.schemas.folders import CreateFolder, RenameFolder
 from productivity_app.schemas.notes import CreateNote, UpdateNote
 from productivity_app.schemas.reminders import CreateReminder, UpdateReminder
 from productivity_app.schemas.search import FullTextSearchQuery
-from productivity_app.schemas.tags import CreateTag, RenameTag
 from productivity_app.schemas.tasks import CreateTask, UpdateTask
 from productivity_app.schemas.timers import (
     CreateTimer,
@@ -21,8 +19,6 @@ from productivity_app.schemas.timers import (
 
 
 def _create_all(application, prefix: str = "Matrix"):
-    folder = application.folders.create_folder(CreateFolder(name=f"{prefix} Folder"))
-    tag = application.tags.create_tag(CreateTag(name=f"{prefix} Tag"))
     task = application.tasks.create_task(CreateTask(title=f"{prefix} Task", description=f"{prefix} task body"))
     note = application.notes.create_note(CreateNote(title=f"{prefix} Note", content=f"{prefix} note body"))
     reminder = application.reminders.create_reminder(CreateReminder(
@@ -31,7 +27,7 @@ def _create_all(application, prefix: str = "Matrix"):
     ))
     timer = application.timers.create_timer(CreateTimer(name=f"{prefix} Timer", planned_duration_ms=60_000))
     preset = application.timers.create_preset(CreateTimerPreset(name=f"{prefix} Preset", duration_ms=60_000))
-    return folder, tag, task, note, reminder, timer, preset
+    return task, note, reminder, timer, preset
 
 
 def test_full_text_search_finds_timer_and_preserves_legacy_search(application) -> None:
@@ -93,11 +89,9 @@ def test_rebuild_repairs_derived_index(application) -> None:
     assert [item.entity_id for item in application.search.search_full_text(FullTextSearchQuery(text="rebuild"))] == [timer.id]
 
 
-def test_all_seven_service_writes_are_synchronized_by_database_triggers(application) -> None:
-    folder, tag, task, note, reminder, timer, preset = _create_all(application, "FTS")
+def test_all_five_service_writes_are_synchronized_by_database_triggers(application) -> None:
+    task, note, reminder, timer, preset = _create_all(application, "FTS")
     expected = {
-        "FOLDER": (folder.id, "FTS Folder", ""),
-        "TAG": (tag.id, "FTS Tag", ""),
         "TASK": (task.id, "FTS Task", "FTS task body"),
         "NOTE": (note.id, "FTS Note", "FTS note body"),
         "REMINDER": (reminder.id, "FTS Reminder", "FTS reminder body"),
@@ -126,10 +120,8 @@ def test_full_text_terms_prefix_phrase_and_hostile_text_are_safe(application) ->
         application.search.search_full_text(FullTextSearchQuery(text=hostile, mode="TERMS"))
 
 
-def test_all_seven_service_updates_refresh_documents_and_fts(application) -> None:
-    folder, tag, task, note, reminder, timer, preset = _create_all(application, "Oldtoken")
-    application.folders.rename_folder(folder.id, RenameFolder(name="Newtoken Folder", expected_version=folder.version))
-    application.tags.rename_tag(tag.id, RenameTag(name="Newtoken Tag", expected_version=tag.version))
+def test_all_five_service_updates_refresh_documents_and_fts(application) -> None:
+    task, note, reminder, timer, preset = _create_all(application, "Oldtoken")
     application.tasks.update_task(task.id, UpdateTask(expected_version=task.version, title="Newtoken Task", description="Newtoken task body"))
     application.notes.update_note(note.id, UpdateNote(expected_version=note.version, title="Newtoken Note", content="Newtoken note body"))
     application.reminders.update_reminder(reminder.id, UpdateReminder(expected_version=reminder.version, title="Newtoken Reminder", message="Newtoken reminder body"))
@@ -138,16 +130,16 @@ def test_all_seven_service_updates_refresh_documents_and_fts(application) -> Non
 
     assert application.search.search_full_text(FullTextSearchQuery(text="oldtoken")) == ()
     results = application.search.search_full_text(FullTextSearchQuery(text="newtoken"))
-    assert {item.entity_type for item in results} == {"TASK", "NOTE", "REMINDER", "TIMER", "FOLDER", "TAG", "TIMER_PRESET"}
+    assert {item.entity_type for item in results} == {"TASK", "NOTE", "REMINDER", "TIMER", "TIMER_PRESET"}
     with application.engine.connect() as connection:
         rows = connection.execute(text("SELECT entity_type,title,body FROM search_documents WHERE title LIKE 'Newtoken %'" )).all()
-    assert len(rows) == 7
-    assert {row[0] for row in rows} == {"TASK", "NOTE", "REMINDER", "TIMER", "FOLDER", "TAG", "TIMER_PRESET"}
+    assert len(rows) == 5
+    assert {row[0] for row in rows} == {"TASK", "NOTE", "REMINDER", "TIMER", "TIMER_PRESET"}
 
 
-def test_all_seven_hard_delete_triggers_remove_documents_and_matches(application) -> None:
+def test_all_five_hard_delete_triggers_remove_documents_and_matches(application) -> None:
     entities = _create_all(application, "Harddelete")
-    table_names = ("folders", "tags", "tasks", "notes", "reminders", "timers", "timer_presets")
+    table_names = ("tasks", "notes", "reminders", "timers", "timer_presets")
     with application.engine.begin() as connection:
         for table_name, entity in zip(table_names, entities, strict=True):
             connection.execute(text(f"DELETE FROM {table_name} WHERE id=:id"), {"id": entity.id})

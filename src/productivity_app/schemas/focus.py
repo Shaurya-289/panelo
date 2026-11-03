@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import UTC, date, datetime
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -127,3 +127,11 @@ class FocusStatsView(_Model):
     model_config = ConfigDict(extra="forbid", frozen=True)
     completed_focus_sessions: int = Field(ge=0)
     focused_duration_ms: int = Field(ge=0)
+
+
+class DailyFocusTotal(NamedTuple):
+    """One local calendar day of focus: completed sessions and focused minutes."""
+
+    day: date
+    sessions: int
+    minutes: int

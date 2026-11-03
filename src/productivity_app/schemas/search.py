@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SearchEntityType = Literal["TASK", "NOTE", "REMINDER", "TIMER", "FOLDER", "TAG", "TIMER_PRESET"]
+SearchEntityType = Literal["TASK", "NOTE", "REMINDER", "TIMER", "TIMER_PRESET"]
 SearchMatchedField = Literal["title", "name", "description", "content", "message"]
 FullTextQueryMode = Literal["TERMS", "PREFIX", "PHRASE"]
 

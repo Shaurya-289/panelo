@@ -261,3 +261,15 @@ def test_backup_during_uncommitted_multi_entity_indexed_transaction_is_atomic(
     assert source_titles == document_titles
     assert set(source_titles) == {"Atomic first old", "Atomic second old"}
     assert new_matches == 0
+
+
+def test_backup_made_before_the_new_design_schema_is_rejected_not_restored(application, tmp_path) -> None:
+    from alembic import command
+
+    from productivity_app.bootstrap import _alembic_config
+    from productivity_app.db.engine import sqlite_url
+
+    previous = tmp_path / "previous-schema.sqlite3"
+    command.upgrade(_alembic_config(sqlite_url(previous), 5_000), "20261002_0002")
+    with pytest.raises(BackupValidationError):
+        application.backups.validate_backup(ValidateBackup(source_path=previous))

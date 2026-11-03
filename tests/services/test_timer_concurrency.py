@@ -4,26 +4,18 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
 
-from productivity_app.core.exceptions import (
-    ActiveTimerConflictError,
-    InvalidStateTransitionError,
-    StaleVersionError,
-)
+from productivity_app.core.exceptions import InvalidStateTransitionError, StaleVersionError
 from productivity_app.schemas.timers import CreateTimer
 
 
-def test_paused_timer_occupies_global_active_slot(application, clock) -> None:
+def test_paused_timer_does_not_block_other_timers(application, clock) -> None:
     first = application.timers.create_timer(CreateTimer(name="A", planned_duration_ms=1_000))
     second = application.timers.create_timer(CreateTimer(name="B", planned_duration_ms=1_000))
     started = application.timers.start_timer(first.id, first.version)
     paused = application.timers.pause_timer(started.id, started.version)
-    try:
-        application.timers.start_timer(second.id, second.version)
-    except ActiveTimerConflictError:
-        pass
-    else:
-        raise AssertionError("A paused timer must occupy the active slot.")
-    assert paused.state == "PAUSED"
+    running = application.timers.start_timer(second.id, second.version)
+    assert paused.state == "PAUSED" and running.state == "RUNNING"
+    assert {timer.id for timer in application.timers.list_active_timers()} == {first.id, second.id}
 
 
 def test_reset_of_active_timer_serializes_with_competing_start(application) -> None:
@@ -45,16 +37,17 @@ def test_reset_of_active_timer_serializes_with_competing_start(application) -> N
         barrier.wait()
         try:
             return application.timers.start_timer(waiting.id, waiting.version)
-        except (ActiveTimerConflictError, InvalidStateTransitionError, StaleVersionError) as exc:
+        except (InvalidStateTransitionError, StaleVersionError) as exc:
             return exc
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         reset_result, start_result = [
             future.result() for future in (executor.submit(reset), executor.submit(start))
         ]
-    assert not (isinstance(reset_result, Exception) and isinstance(start_result, Exception))
-    active_rows = application.timers.list_timers()
-    assert sum(timer.state in {"RUNNING", "PAUSED"} for timer in active_rows) <= 1
+    # Independent timers: neither operation can make the other fail.
+    assert not isinstance(reset_result, Exception) and not isinstance(start_result, Exception)
+    states = {timer.id: timer.state for timer in application.timers.list_timers()}
+    assert states == {active.id: "READY", waiting.id: "RUNNING"}
 
 
 def test_pause_complete_and_reconcile_races_leave_single_closed_run(application, clock) -> None:
@@ -92,7 +85,7 @@ def test_pause_complete_and_reconcile_races_leave_single_closed_run(application,
 
     def reconcile() -> object:
         barrier.wait()
-        return application.timers.reconcile_expired_timer()
+        return application.timers.reconcile_expired_timers()
 
     def complete_expired() -> object:
         barrier.wait()
@@ -106,6 +99,6 @@ def test_pause_complete_and_reconcile_races_leave_single_closed_run(application,
             future.result()
             for future in (executor.submit(reconcile), executor.submit(complete_expired))
         ]
-    assert sum(result is not None and not isinstance(result, Exception) for result in results) == 1
+    assert sum(bool(result) and not isinstance(result, Exception) for result in results) == 1
     assert application.timers.get_timer(timer.id).state == "FINISHED"
     assert len(application.timers.list_timer_runs(timer.id)) == 2

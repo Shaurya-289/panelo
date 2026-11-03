@@ -15,8 +15,8 @@ def test_reminder_repository_claims_one_version_and_filters_timing(application, 
 
     with application.unit_of_work_factory() as uow:
         assert uow.reminders is not None
-        assert uow.reminders.claim_version(past.id, past.version, clock.now, deleted=False)
-        assert not uow.reminders.claim_version(past.id, past.version, clock.now, deleted=False)
+        assert uow.reminders.claim_version(past.id, past.version, clock.now)
+        assert not uow.reminders.claim_version(past.id, past.version, clock.now)
         uow.commit()
 
     with application.unit_of_work_factory() as uow:

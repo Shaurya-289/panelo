@@ -23,6 +23,8 @@ ReminderSort = Literal[
     "status",
 ]
 ReminderLinkType = Literal["ANY", "NONE", "TASK", "NOTE"]
+RepeatKindValue = Literal["DAILY", "WEEKDAYS", "WEEKLY", "MONTHLY", "YEARLY", "EVERY"]
+RepeatUnitValue = Literal["HOURS", "DAYS", "WEEKS"]
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -37,6 +39,57 @@ class _ReminderModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReminderRepeat(_ReminderModel):
+    """A repeat rule; which fields apply depends on ``kind`` (see ``core.recurrence``).
+
+    * ``DAILY``, ``WEEKDAYS``, ``YEARLY``: no other fields
+    * ``WEEKLY``: ``days`` (weekday numbers, Sunday 0 .. Saturday 6), at least one
+    * ``MONTHLY``: ``day_of_month`` (1..31; a short month uses its last day)
+    * ``EVERY``: ``every_n`` (>= 1) and ``every_unit``
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: RepeatKindValue
+    days: tuple[int, ...] = ()
+    day_of_month: int | None = None
+    every_n: int | None = None
+    every_unit: RepeatUnitValue | None = None
+
+    @field_validator("days")
+    @classmethod
+    def _weekdays(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if any(day < 0 or day > 6 for day in value):
+            raise ValueError("Weekdays must be numbers from 0 (Sunday) to 6 (Saturday).")
+        return tuple(sorted(set(value)))
+
+    @model_validator(mode="after")
+    def _fields_match_kind(self) -> ReminderRepeat:
+        expected = {
+            "WEEKLY": {"days"},
+            "MONTHLY": {"day_of_month"},
+            "EVERY": {"every_n", "every_unit"},
+        }.get(self.kind, set())
+        given = {
+            name
+            for name, present in (
+                ("days", bool(self.days)),
+                ("day_of_month", self.day_of_month is not None),
+                ("every_n", self.every_n is not None),
+                ("every_unit", self.every_unit is not None),
+            )
+            if present
+        }
+        if given != expected:
+            wanted = ", ".join(sorted(expected)) or "no other fields"
+            raise ValueError(f"A {self.kind} repeat rule takes exactly: {wanted}.")
+        if self.day_of_month is not None and not 1 <= self.day_of_month <= 31:
+            raise ValueError("Day of month must be between 1 and 31.")
+        if self.every_n is not None and self.every_n < 1:
+            raise ValueError("Repeat interval must be at least 1.")
+        return self
+
+
 class CreateReminder(_ReminderModel):
     title: str = Field(min_length=1, max_length=300)
     message: str = Field(default="", max_length=100_000)
@@ -44,6 +97,7 @@ class CreateReminder(_ReminderModel):
     scheduled_timezone: str = Field(min_length=1, max_length=64)
     task_id: str | None = None
     note_id: str | None = None
+    repeat: ReminderRepeat | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -89,6 +143,8 @@ class UpdateReminder(_ReminderModel):
     scheduled_timezone: str | None = Field(default=None, max_length=64)
     task_id: str | None = None
     note_id: str | None = None
+    # Omit to keep the current rule; None clears it.
+    repeat: ReminderRepeat | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -155,7 +211,6 @@ class ReminderQuery(ReminderPageQuery):
     linked_id: str | None = None
     due_from_utc: datetime | None = None
     due_before_utc: datetime | None = None
-    include_deleted: bool = False
     sort: ReminderSort = "updated_newest"
 
     @field_validator("statuses", "timing_states")
@@ -201,10 +256,14 @@ class ReminderSummary(_ReminderModel):
     completed_at_utc: datetime | None
     cancelled_at_utc: datetime | None
     snooze_count: int
+    repeat: ReminderRepeat | None
+    repeat_description: str | None
+    anchor_at_utc: datetime | None
+    # How many times Done advanced this repeating reminder to its next occurrence.
+    times_done: int
     created_at_utc: datetime
     updated_at_utc: datetime
     version: int
-    deleted_at_utc: datetime | None
 
 
 class ReminderView(ReminderSummary):

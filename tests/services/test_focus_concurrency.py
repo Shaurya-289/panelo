@@ -202,7 +202,7 @@ def test_expiry_reconcile_advance_race_requires_explicit_post_reconcile_advance(
     completed: list[DomainEvent] = []
     subscription = application.subscribe("TIMER_COMPLETED", completed.append)
     outcomes = _race(
-        application.timers.reconcile_expired_timer,
+        application.timers.reconcile_expired_timers,
         lambda: application.focus.advance_sequence(
             sequence.id, AdvanceFocusSequence(expected_version=sequence.version)
         ),

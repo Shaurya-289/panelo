@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from productivity_app.core.clock import Clock
 from productivity_app.core.events import DomainEvent
 from productivity_app.core.exceptions import (
-    ActiveTimerConflictError,
     ConflictError,
     DatabaseCorruptionError,
     DuplicateNameError,
@@ -61,8 +60,6 @@ _TIMER_CHECKS = (
 
 def _translate(exc: IntegrityError) -> None:
     message = str(exc.orig).lower() if exc.orig else ""
-    if "ux_timers_one_active" in message or "index 'ux_timers_one_active'" in message:
-        raise ActiveTimerConflictError("Another timer is already running or paused.") from exc
     if (
         "ux_timer_runs_one_open" in message
         or "unique constraint failed: timer_runs.timer_id" in message
@@ -383,8 +380,6 @@ class TimerService:
             self._guard_focus_timer(uow, timer, "start")
             if timer.state != "READY":
                 raise InvalidStateTransitionError("Only ready timers may start.")
-            if repo.active(exclude_id=timer.id) is not None:
-                raise ActiveTimerConflictError("Another timer is already running or paused.")
             self._claim(uow, timer, expected_version, now)
             timer.state = "RUNNING"
             timer.elapsed_before_run_ms = 0
@@ -567,30 +562,33 @@ class TimerService:
             self._commit(uow)
             return _view(timer, now)
 
-    def reconcile_expired_timer(self) -> TimerView | None:
+    def reconcile_expired_timers(self) -> tuple[TimerView, ...]:
+        """Complete every running timer whose deadline has passed."""
         now = self._clock.now_utc()
         with self._uows() as uow:
             uow.acquire_write_lock()
-            timer = self._repo(uow).expired_running(now)
-            if timer is None:
-                return None
-            deadline = timer.deadline_at_utc
-            if deadline is None:
-                raise DatabaseCorruptionError("Running timer has no deadline.")
-            self._claim(uow, timer, timer.version, now)
-            self._close_active(
-                uow, timer, now, "FINISHED", ended=deadline, elapsed=timer.planned_duration_ms
-            )
-            timer.state = "FINISHED"
-            self._event(uow, "TIMER_COMPLETED", timer, now)
+            completed: list[Timer] = []
+            for timer in self._repo(uow).expired_running(now):
+                deadline = timer.deadline_at_utc
+                if deadline is None:
+                    raise DatabaseCorruptionError("Running timer has no deadline.")
+                self._claim(uow, timer, timer.version, now)
+                self._close_active(
+                    uow, timer, now, "FINISHED", ended=deadline, elapsed=timer.planned_duration_ms
+                )
+                timer.state = "FINISHED"
+                self._event(uow, "TIMER_COMPLETED", timer, now)
+                completed.append(timer)
+            if not completed:
+                return ()
             self._commit(uow)
-            return _view(timer, now)
+            return tuple(_view(timer, now) for timer in completed)
 
-    def get_active_timer(self) -> TimerView | None:
+    def list_active_timers(self) -> tuple[TimerView, ...]:
+        """Running and paused timers (several may be active at once), newest start first."""
         now = self._clock.now_utc()
         with self._uows() as uow:
-            timer = self._repo(uow).active()
-            return _view(timer, now) if timer else None
+            return tuple(_view(timer, now) for timer in self._repo(uow).active_timers())
 
     def list_timers(self, query: TimerQuery | None = None) -> tuple[TimerSummary, ...]:
         now = self._clock.now_utc()

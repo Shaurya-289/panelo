@@ -1,4 +1,4 @@
-"""Public contracts for manual local SQLite backups."""
+"""Public contracts for local SQLite backups."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-BackupKind = Literal["MANUAL", "PRE_RESTORE"]
+BackupKind = Literal["MANUAL", "AUTO", "PRE_RESTORE"]
 
 
 class BackupPageQuery(BaseModel):

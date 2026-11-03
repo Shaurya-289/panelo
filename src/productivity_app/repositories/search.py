@@ -15,7 +15,7 @@ from productivity_app.db.fts_contract import (
     EXPECTED_NORMALIZED_FTS_TRIGGER_SQL,
     normalize_fts_sql,
 )
-from productivity_app.db.models.initial import Folder, Note, Reminder, Tag, Task, Timer, TimerPreset
+from productivity_app.db.models.initial import Note, Reminder, Task, Timer, TimerPreset
 from productivity_app.db.types import datetime_to_epoch_microseconds
 from productivity_app.schemas.search import FullTextSearchQuery, UnifiedSearchQuery
 
@@ -24,9 +24,7 @@ _ENTITY_PRIORITY = {
     "NOTE": 1,
     "REMINDER": 2,
     "TIMER": 3,
-    "FOLDER": 4,
-    "TAG": 5,
-    "TIMER_PRESET": 6,
+    "TIMER_PRESET": 4,
 }
 _ACTIVE_REMINDER_STATES = ("PENDING", "TRIGGERED", "OVERDUE")
 @dataclass(frozen=True, slots=True)
@@ -76,6 +74,7 @@ class SearchRepository:
             body_column: Any | None = None,
             state_column: Any | None = None,
             derived_column: Any | None = None,
+            has_trash: bool = True,
         ) -> Any:
             title = title_column  # SQLAlchemy expressions are intentionally structural here.
             title_exact = title.collate("NOCASE") == query.query
@@ -92,7 +91,7 @@ class SearchRepository:
                 else_=3,
             )
             matched = case(
-                (title_exact | title_prefix | title_contains, "name" if entity_type in {"FOLDER", "TAG", "TIMER", "TIMER_PRESET"} else "title"),
+                (title_exact | title_prefix | title_contains, "name" if entity_type in {"TIMER", "TIMER_PRESET"} else "title"),
                 else_={"TASK": "description", "NOTE": "content", "REMINDER": "message"}.get(entity_type, "name"),
             )
             stmt = select(
@@ -103,11 +102,13 @@ class SearchRepository:
                 (state_column if state_column is not None else literal(None)).label("persisted_state"),
                 (derived_column if derived_column is not None else literal(None)).label("derived_state"),
                 model.updated_at_utc.label("updated_at_utc"),
-                (model.deleted_at_utc.is_not(None)).label("is_deleted"),
+                (
+                    model.deleted_at_utc.is_not(None) if has_trash else literal(False)
+                ).label("is_deleted"),
                 rank.label("rank"),
                 literal(_ENTITY_PRIORITY[entity_type]).label("type_rank"),
             ).where(matches)
-            if not query.include_deleted:
+            if has_trash and not query.include_deleted:
                 stmt = stmt.where(model.deleted_at_utc.is_(None))
             return stmt
 
@@ -124,7 +125,10 @@ class SearchRepository:
                 else_="OVERDUE",
             )
             branches.append(
-                branch("REMINDER", Reminder, Reminder.title, Reminder.message, Reminder.status, reminder_timing)
+                branch(
+                    "REMINDER", Reminder, Reminder.title, Reminder.message, Reminder.status,
+                    reminder_timing, has_trash=False,  # reminders are deleted permanently
+                )
             )
         if "TIMER" in requested:
             timer_effective = case(
@@ -132,10 +136,6 @@ class SearchRepository:
                 else_=Timer.state,
             )
             branches.append(branch("TIMER", Timer, Timer.name, state_column=Timer.state, derived_column=timer_effective))
-        if "FOLDER" in requested:
-            branches.append(branch("FOLDER", Folder, Folder.name))
-        if "TAG" in requested:
-            branches.append(branch("TAG", Tag, Tag.name))
         if "TIMER_PRESET" in requested:
             branches.append(branch("TIMER_PRESET", TimerPreset, TimerPreset.name))
 
@@ -180,17 +180,15 @@ WITH matches AS (
 ), entities AS (
   SELECT 'TASK' entity_type,id entity_id,title,'description' body_field,status persisted_state,NULL derived_state,updated_at_utc,deleted_at_utc FROM tasks
   UNION ALL SELECT 'NOTE',id,title,'content',NULL,NULL,updated_at_utc,deleted_at_utc FROM notes
-  UNION ALL SELECT 'REMINDER',id,title,'message',status,CASE WHEN status NOT IN ('PENDING','TRIGGERED','OVERDUE') THEN NULL WHEN due_at_utc > :now THEN 'UPCOMING' WHEN due_at_utc = :now THEN 'DUE' ELSE 'OVERDUE' END,updated_at_utc,deleted_at_utc FROM reminders
+  UNION ALL SELECT 'REMINDER',id,title,'message',status,CASE WHEN status NOT IN ('PENDING','TRIGGERED','OVERDUE') THEN NULL WHEN due_at_utc > :now THEN 'UPCOMING' WHEN due_at_utc = :now THEN 'DUE' ELSE 'OVERDUE' END,updated_at_utc,NULL FROM reminders
   UNION ALL SELECT 'TIMER',id,name,'name',state,CASE WHEN state='RUNNING' AND deadline_at_utc <= :now THEN 'FINISHED' ELSE state END,updated_at_utc,deleted_at_utc FROM timers
-  UNION ALL SELECT 'FOLDER',id,name,'name',NULL,NULL,updated_at_utc,deleted_at_utc FROM folders
-  UNION ALL SELECT 'TAG',id,name,'name',NULL,NULL,updated_at_utc,deleted_at_utc FROM tags
   UNION ALL SELECT 'TIMER_PRESET',id,name,'name',NULL,NULL,updated_at_utc,deleted_at_utc FROM timer_presets
 )
 SELECT e.entity_type,e.entity_id,e.title,
-       CASE WHEN m.title_hit=1 THEN CASE WHEN e.entity_type IN ('TIMER','FOLDER','TAG','TIMER_PRESET') THEN 'name' ELSE 'title' END ELSE e.body_field END matched_field,
+       CASE WHEN m.title_hit=1 THEN CASE WHEN e.entity_type IN ('TIMER','TIMER_PRESET') THEN 'name' ELSE 'title' END ELSE e.body_field END matched_field,
        e.persisted_state,e.derived_state,e.updated_at_utc,(e.deleted_at_utc IS NOT NULL) is_deleted,
        CASE WHEN e.title COLLATE NOCASE = :raw THEN 0 WHEN e.title LIKE :prefix ESCAPE '\\' THEN 1 WHEN m.title_hit=1 THEN 2 ELSE 3 END tier,
-       CASE e.entity_type WHEN 'TASK' THEN 0 WHEN 'NOTE' THEN 1 WHEN 'REMINDER' THEN 2 WHEN 'TIMER' THEN 3 WHEN 'FOLDER' THEN 4 WHEN 'TAG' THEN 5 ELSE 6 END type_rank
+       CASE e.entity_type WHEN 'TASK' THEN 0 WHEN 'NOTE' THEN 1 WHEN 'REMINDER' THEN 2 WHEN 'TIMER' THEN 3 ELSE 4 END type_rank
 FROM matches m JOIN entities e ON e.entity_type=m.entity_type AND e.entity_id=m.entity_id
 WHERE (:deleted=1 OR e.deleted_at_utc IS NULL)
   AND e.entity_type IN :types
@@ -223,8 +221,6 @@ WITH expected(entity_type, entity_id, title, body) AS (
   UNION ALL SELECT 'NOTE', id, title, content FROM notes
   UNION ALL SELECT 'REMINDER', id, title, message FROM reminders
   UNION ALL SELECT 'TIMER', id, name, '' FROM timers
-  UNION ALL SELECT 'FOLDER', id, name, '' FROM folders
-  UNION ALL SELECT 'TAG', id, name, '' FROM tags
   UNION ALL SELECT 'TIMER_PRESET', id, name, '' FROM timer_presets
 )
 SELECT 1 FROM (
@@ -265,7 +261,5 @@ SELECT 'TASK', id, title, description FROM tasks
 UNION ALL SELECT 'NOTE', id, title, content FROM notes
 UNION ALL SELECT 'REMINDER', id, title, message FROM reminders
 UNION ALL SELECT 'TIMER', id, name, '' FROM timers
-UNION ALL SELECT 'FOLDER', id, name, '' FROM folders
-UNION ALL SELECT 'TAG', id, name, '' FROM tags
 UNION ALL SELECT 'TIMER_PRESET', id, name, '' FROM timer_presets
 """))

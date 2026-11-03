@@ -293,8 +293,6 @@ class DomainPresenter(QObject):
                     "notes.list_notes",
                     (
                         NoteQuery(
-                            folder_id=self.folder_filter,
-                            tag_id=self.tag_filter,
                             include_deleted=deleted,
                             is_pinned=True if mode == "Pinned" else None,
                             is_archived=True if mode == "Archived" else None,
@@ -329,8 +327,6 @@ class DomainPresenter(QObject):
                     "tasks.list_tasks",
                     (
                         TaskQuery(
-                            folder_id=self.folder_filter,
-                            tag_id=self.tag_filter,
                             priorities=cast(
                                 Any, (self.priority_filter,) if self.priority_filter else ()
                             ),
@@ -349,7 +345,7 @@ class DomainPresenter(QObject):
             action = (
                 Action(
                     "reminders.list_reminders",
-                    (ReminderQuery(include_deleted=deleted, sort="due_soonest", **page),),
+                    (ReminderQuery(sort="due_soonest", **page),),
                 )
                 if mode in {"All", "Deleted"}
                 else Action(f"reminders.list_{mode.lower()}", (ReminderPageQuery(**page),))

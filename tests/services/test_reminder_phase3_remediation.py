@@ -154,12 +154,11 @@ def test_note_and_task_parent_deletion_preserve_independent_historical_link(
 
     after = application.reminders.get_reminder(reminder.id)
     assert after.version == reminder.version
-    assert after.deleted_at_utc is None
     assert getattr(after, f"{parent_kind}_id") == parent.id
 
 
 @pytest.mark.parametrize("parent_kind", ("task", "note"))
-@pytest.mark.parametrize("operation", ("create", "relink", "restore"))
+@pytest.mark.parametrize("operation", ("create", "relink"))
 def test_parent_relationship_races_are_serializable(
     application, app_config, clock, parent_kind: str, operation: str
 ) -> None:
@@ -194,34 +193,21 @@ def test_parent_relationship_races_are_serializable(
 
     else:
         original = application.reminders.create_reminder(
-            CreateReminder(
-                title="Existing",
-                due_at_utc=clock.now,
-                scheduled_timezone="UTC",
-                **({f"{parent_kind}_id": parent.id} if operation == "restore" else {}),
-            )
+            CreateReminder(title="Existing", due_at_utc=clock.now, scheduled_timezone="UTC")
         )
         reminder_id = original.id
-        if operation == "relink":
 
-            def reminder_write() -> str:
-                try:
-                    application.reminders.update_reminder(
-                        original.id,
-                        UpdateReminder(
-                            expected_version=original.version, **{f"{parent_kind}_id": parent.id}
-                        ),
-                    )
-                    return "relinked"
-                except NotFoundError:
-                    return "not-found"
-
-        else:
-            deleted = application.reminders.delete_reminder(original.id, original.version)
-
-            def reminder_write() -> str:
-                application.reminders.restore_reminder(deleted.id, deleted.version)
-                return "restored"
+        def reminder_write() -> str:
+            try:
+                application.reminders.update_reminder(
+                    original.id,
+                    UpdateReminder(
+                        expected_version=original.version, **{f"{parent_kind}_id": parent.id}
+                    ),
+                )
+                return "relinked"
+            except NotFoundError:
+                return "not-found"
 
     barrier = Barrier(2)
 
@@ -235,14 +221,12 @@ def test_parent_relationship_races_are_serializable(
         write_result, delete_result = writer.result(), deleter.result()
 
     assert delete_result == "deleted"
-    assert write_result in {"created", "relinked", "restored", "not-found"}
+    assert write_result in {"created", "relinked", "not-found"}
     if reminder_id is not None:
         row = _fresh_row(app_config, reminder_id)
         link_position = 0 if parent_kind == "task" else 1
         if write_result != "not-found":
             assert row[link_position] == parent.id
-        if operation == "restore":
-            assert row[6] == deleted.version + 1
 
 
 @pytest.mark.parametrize(
@@ -255,6 +239,7 @@ def test_parent_relationship_races_are_serializable(
         ("delete", "complete"),
         ("delete", "dismiss"),
         ("delete", "cancel"),
+        ("delete", "update"),
     ),
 )
 def test_conflicting_active_lifecycle_writers_have_one_committed_winner(
@@ -298,59 +283,17 @@ def test_conflicting_active_lifecycle_writers_have_one_committed_winner(
         results = [left_future.result(), right_future.result()]
 
     assert sum(result not in {"InvalidStateTransitionError", "NotFoundError", "StaleVersionError"} for result in results) == 1
+    assert len(observed) == 1
+    if "DELETED" in results:
+        # Deleted for good: the row and its history are gone.
+        with pytest.raises(NotFoundError):
+            application.reminders.get_reminder(reminder.id)
+        return
     row = _fresh_row(app_config, reminder.id)
     assert row[6] == reminder.version + 1
     terminal_count = sum(value is not None for value in row[8:11])
     assert terminal_count in {0, 1}
     assert _history_count(application, reminder.id) == 2
-    assert len(observed) == 1
-
-
-def test_restore_races_with_update_and_delete_have_one_valid_outcome(application, app_config, clock) -> None:
-    for competing in ("update", "delete"):
-        reminder = application.reminders.create_reminder(
-            CreateReminder(title=competing, due_at_utc=clock.now, scheduled_timezone="UTC")
-        )
-        deleted = application.reminders.delete_reminder(reminder.id, reminder.version)
-        observed = _events(application, ("REMINDER_RESTORED", "REMINDER_UPDATED", "REMINDER_DELETED"))
-        barrier = Barrier(2)
-
-        def restore(
-            operation_barrier: Barrier = barrier, deleted_reminder=deleted
-        ) -> str:
-            operation_barrier.wait()
-            try:
-                return application.reminders.restore_reminder(
-                    deleted_reminder.id, deleted_reminder.version
-                ).status
-            except (NotFoundError, StaleVersionError) as exc:
-                return type(exc).__name__
-
-        def compete(
-            operation_barrier: Barrier = barrier,
-            competitor: str = competing,
-            deleted_reminder=deleted,
-        ) -> str:
-            operation_barrier.wait()
-            try:
-                if competitor == "update":
-                    return application.reminders.update_reminder(
-                        deleted_reminder.id,
-                        UpdateReminder(expected_version=deleted_reminder.version, title="Changed"),
-                    ).status
-                return application.reminders.delete_reminder(
-                    deleted_reminder.id, deleted_reminder.version
-                ).status
-            except (NotFoundError, StaleVersionError) as exc:
-                return type(exc).__name__
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            outcomes = [executor.submit(restore), executor.submit(compete)]
-            outcomes = [future.result() for future in outcomes]
-        assert outcomes.count("PENDING") == 1
-        row = _fresh_row(app_config, deleted.id)
-        assert row[6] == deleted.version + 1
-        assert len(observed) == 1
 
 
 @pytest.mark.parametrize(
@@ -405,7 +348,7 @@ def test_stale_active_commands_do_not_drift_history_or_events(application, clock
     assert observed == []
 
 
-def test_stale_reopen_and_restore_do_not_drift_history_or_events(application, clock) -> None:
+def test_stale_reopen_does_not_drift_history_or_events(application, clock) -> None:
     completed_source = application.reminders.create_reminder(
         CreateReminder(title="Complete", due_at_utc=clock.now, scheduled_timezone="UTC")
     )
@@ -416,15 +359,6 @@ def test_stale_reopen_and_restore_do_not_drift_history_or_events(application, cl
         application.reminders.reopen_reminder(completed.id, completed.version - 1)
     assert application.reminders.get_reminder(completed.id) == current
     assert _history_count(application, completed.id) == count
-
-    restore_source = application.reminders.create_reminder(
-        CreateReminder(title="Restore", due_at_utc=clock.now, scheduled_timezone="UTC")
-    )
-    deleted = application.reminders.delete_reminder(restore_source.id, restore_source.version)
-    count = _history_count(application, deleted.id)
-    with pytest.raises(StaleVersionError):
-        application.reminders.restore_reminder(deleted.id, deleted.version - 1)
-    assert _history_count(application, deleted.id) == count
 
 
 @pytest.mark.parametrize("terminal", ("complete", "dismiss", "cancel"))
@@ -448,7 +382,6 @@ def test_every_forbidden_terminal_command_preserves_reminder(application, clock,
                 "REMINDER_CANCELLED",
                 "REMINDER_REOPENED",
                 "REMINDER_DELETED",
-                "REMINDER_RESTORED",
             ),
         )
         with pytest.raises(InvalidStateTransitionError):
@@ -597,7 +530,6 @@ def test_every_direct_command_records_exact_history_and_domain_event(application
         "REMINDER_REOPENED",
         "REMINDER_CANCELLED",
         "REMINDER_DELETED",
-        "REMINDER_RESTORED",
     )
     observed = _events(application, tuple(dict.fromkeys(expected_types)))
     due = application.reminders.create_reminder(
@@ -615,8 +547,8 @@ def test_every_direct_command_records_exact_history_and_domain_event(application
     dismissed = application.reminders.dismiss_reminder(reopened.id, reopened.version)
     reopened_again = application.reminders.reopen_reminder(dismissed.id, dismissed.version)
     cancelled = application.reminders.cancel_reminder(reopened_again.id, reopened_again.version)
-    deleted = application.reminders.delete_reminder(cancelled.id, cancelled.version)
-    restored = application.reminders.restore_reminder(deleted.id, deleted.version)
+    history = application.reminders.list_reminder_events(due.id, ReminderPageQuery(limit=200))
+    application.reminders.delete_reminder(cancelled.id, cancelled.version)
 
     assert [event.event_type for event in observed] == list(expected_types)
     for version, event in enumerate(observed, start=1):
@@ -624,10 +556,11 @@ def test_every_direct_command_records_exact_history_and_domain_event(application
         assert event.occurred_at_utc == clock.now
         assert event.payload == {}
         assert event.event_id == f"reminder:{event.event_type.lower()}:{due.id}:{version}"
-    history = application.reminders.list_reminder_events(due.id, ReminderPageQuery(limit=200))
-    assert len(history) == len(observed)
-    assert sorted(item.event_type for item in history) == sorted(expected_types)
-    assert restored.status == "CANCELLED"
+    # The audit history is the same events minus the delete, which removed it with the row.
+    assert len(history) == len(observed) - 1
+    assert sorted(item.event_type for item in history) == sorted(expected_types[:-1])
+    with pytest.raises(NotFoundError):
+        application.reminders.list_reminder_events(due.id, ReminderPageQuery(limit=200))
 
 
 def test_reminder_integrity_translation_remains_narrow() -> None:
@@ -664,7 +597,7 @@ def test_reminder_filters_sorts_and_pagination_are_exact_and_stable(application,
 
     assert [item.id for item in application.reminders.list_reminders(ReminderQuery(timing_states=("DUE",)))] == [due.id]
     assert [item.id for item in application.reminders.list_reminders(ReminderQuery(link_type="TASK"))] == [due.id]
-    assert [item.id for item in application.reminders.list_reminders(ReminderQuery(link_type="NOTE", include_deleted=True))] == [future.id]
+    assert application.reminders.list_reminders(ReminderQuery(link_type="NOTE")) == ()
     assert [item.id for item in application.reminders.list_reminders(ReminderQuery(link_type="NONE"))] == [terminal.id]
     assert [item.id for item in application.reminders.list_reminders(ReminderQuery(statuses=("COMPLETED",)))] == [terminal.id]
     assert [item.id for item in application.reminders.list_reminders(ReminderQuery(due_before_utc=clock.now))] == [terminal.id]
@@ -726,7 +659,7 @@ def test_reminder_filters_sorts_and_pagination_are_exact_and_stable(application,
         ReminderQuery(link_type="ANY", linked_id=task.id)
     with pytest.raises(PydanticValidationError):
         ReminderQuery(statuses=("COMPLETED",), timing_states=("DUE",))
-    assert deleted.deleted_at_utc is not None
+    assert deleted.id == future.id
 
 
 def test_history_and_audit_event_pages_use_declared_tie_breakers(application, clock) -> None:

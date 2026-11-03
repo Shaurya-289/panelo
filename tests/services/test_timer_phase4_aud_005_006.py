@@ -105,8 +105,7 @@ def _close_run(application, clock, timer, outcome: str):
         return application.timers.complete_timer(timer.id, timer.version)
     if outcome == "FINISHED":
         clock.now += timedelta(milliseconds=100)
-        result = application.timers.reconcile_expired_timer()
-        assert result is not None
+        (result,) = application.timers.reconcile_expired_timers()
         return result
     if outcome == "CANCELLED":
         return application.timers.cancel_timer(timer.id, timer.version)
@@ -720,7 +719,7 @@ def test_expired_restart_reconciles_once_and_second_restart_is_idempotent(
     clock.now += timedelta(milliseconds=200)
     calls: list[object] = []
     published: list[DomainEvent] = []
-    original = TimerService.reconcile_expired_timer
+    original = TimerService.reconcile_expired_timers
     original_publish = InProcessEventBus.publish
 
     def spy(self):
@@ -733,13 +732,13 @@ def test_expired_restart_reconciles_once_and_second_restart_is_idempotent(
             published.append(event)
         return original_publish(self, event)
 
-    monkeypatch.setattr(TimerService, "reconcile_expired_timer", spy)
+    monkeypatch.setattr(TimerService, "reconcile_expired_timers", spy)
     monkeypatch.setattr(InProcessEventBus, "publish", publish_spy)
     first = create_application(app_config, clock)
     completed = first.timers.get_timer(timer.id)
     assert completed.state == "FINISHED" and completed.version == timer.version + 1
     assert completed.ended_at_utc == deadline and completed.updated_at_utc == clock.now
-    assert calls == [completed]
+    assert calls == [(completed,)]
     assert len(published) == 1
     assert published[0].entity_id == timer.id
     assert published[0].event_id == (f"timer:timer_completed:{timer.id}:{completed.version}")
@@ -749,7 +748,7 @@ def test_expired_restart_reconciles_once_and_second_restart_is_idempotent(
     again = second.timers.get_timer(timer.id)
     second.close()
     assert len(calls) == 2
-    assert calls[1] is None
+    assert calls[1] == ()
     assert len(published) == 1
     assert again.version == completed.version and again.ended_at_utc == deadline
     runs = _rows(
@@ -766,7 +765,7 @@ def test_bootstrap_calls_reconciliation_exactly_once_with_no_active_timer(
     calls = 0
     published: list[DomainEvent] = []
     threads_before = {thread.ident for thread in threading.enumerate()}
-    original = TimerService.reconcile_expired_timer
+    original = TimerService.reconcile_expired_timers
     original_publish = InProcessEventBus.publish
 
     def spy(self):
@@ -778,11 +777,11 @@ def test_bootstrap_calls_reconciliation_exactly_once_with_no_active_timer(
         published.append(event)
         return original_publish(self, event)
 
-    monkeypatch.setattr(TimerService, "reconcile_expired_timer", spy)
+    monkeypatch.setattr(TimerService, "reconcile_expired_timers", spy)
     monkeypatch.setattr(InProcessEventBus, "publish", publish_spy)
     app = create_application(app_config, clock)
     try:
-        assert calls == 1 and app.timers.get_active_timer() is None
+        assert calls == 1 and app.timers.list_active_timers() == ()
         assert published == []
         assert {thread.ident for thread in threading.enumerate()} == threads_before
     finally:

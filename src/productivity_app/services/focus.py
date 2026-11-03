@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import IntegrityError
 
@@ -26,6 +27,7 @@ from productivity_app.schemas.focus import (
     CancelFocusSequence,
     CreateFocusSequence,
     CreateFocusSession,
+    DailyFocusTotal,
     FocusPhaseKind,
     FocusSequenceQuery,
     FocusSequenceState,
@@ -261,3 +263,60 @@ class FocusService:
         with self._uows() as uow:
             completed, duration = self._repo(uow).focus_stats(query or FocusStatsQuery())
             return FocusStatsView(completed_focus_sessions=completed, focused_duration_ms=duration)
+
+    @staticmethod
+    def _zone(tz: str | tzinfo) -> tzinfo:
+        return ZoneInfo(tz) if isinstance(tz, str) else tz
+
+    def daily_totals(self, days: int, tz: str | tzinfo) -> tuple[DailyFocusTotal, ...]:
+        """Completed focus sessions and focused minutes for each of the last ``days`` local days.
+
+        Oldest day first, ending with today; days without focus are zero rows.  A session
+        counts on the local day it started and only when it ran its full length, while the
+        minutes also include sessions that were finished early (as ``get_stats`` does).
+        """
+        if days < 1:
+            raise ValueError("days must be at least 1.")
+        zone = self._zone(tz)
+        today = self._clock.now_utc().astimezone(zone).date()
+        first = today - timedelta(days=days - 1)
+        since = datetime.combine(first, time.min, tzinfo=zone).astimezone(UTC)
+        sessions: dict[date, int] = {}
+        milliseconds: dict[date, int] = {}
+        with self._uows() as uow:
+            for started, actual_ms, outcome in self._repo(uow).focus_runs_since(since):
+                day = started.astimezone(zone).date()
+                milliseconds[day] = milliseconds.get(day, 0) + actual_ms
+                if outcome == "FINISHED":
+                    sessions[day] = sessions.get(day, 0) + 1
+        return tuple(
+            DailyFocusTotal(
+                day,
+                sessions.get(day, 0),
+                round(milliseconds.get(day, 0) / 60_000),
+            )
+            for day in (first + timedelta(days=offset) for offset in range(days))
+        )
+
+    def streak(self, tz: str | tzinfo) -> int:
+        """Consecutive local days with at least one completed focus session.
+
+        The run ends today, or yesterday while today has no session yet (a streak only
+        breaks once a whole day passes without one).
+        """
+        zone = self._zone(tz)
+        today = self._clock.now_utc().astimezone(zone).date()
+        expected = today
+        counted: date | None = None
+        count = 0
+        with self._uows() as uow:
+            for started in self._repo(uow).completed_focus_starts():
+                day = started.astimezone(zone).date()
+                if day > today or day == counted:
+                    continue  # a future-dated run, or another session on a day already counted
+                if counted is None and day == today - timedelta(days=1):
+                    expected = day  # nothing yet today: the run may still end yesterday
+                if day != expected:
+                    break
+                count, counted, expected = count + 1, day, day - timedelta(days=1)
+        return count

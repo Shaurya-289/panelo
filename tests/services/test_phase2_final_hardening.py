@@ -10,16 +10,9 @@ from threading import Barrier
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
 from productivity_app.core.exceptions import NotFoundError, StaleVersionError
 from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.db.types import datetime_to_epoch_microseconds
-from productivity_app.repositories.folders import FolderRepository
-from productivity_app.repositories.tasks import TaskRepository
-from productivity_app.schemas.folders import CreateFolder
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.tags import CreateTag
 from productivity_app.schemas.tasks import (
     CreateTask,
     TaskCalendarQuery,
@@ -37,8 +30,6 @@ _TASK_EVENT_TYPES = (
     "TASK_COMPLETED",
     "TASK_CANCELLED",
     "TASK_REOPENED",
-    "TASK_MOVED",
-    "TASK_TAGS_CHANGED",
     "TASK_DELETED",
     "TASK_RESTORED",
 )
@@ -115,195 +106,6 @@ def test_restore_and_update_race_is_serialized_and_durable(application) -> None:
         application,
         f"SELECT title, deleted_at_utc, version FROM tasks WHERE id = '{task.id}'",
     ) == [("original", None, deleted.version + 1)]
-
-
-def test_multi_tag_replacement_racing_tag_delete_is_atomic(application) -> None:
-    first = application.tags.create_tag(CreateTag(name="First"))
-    second = application.tags.create_tag(CreateTag(name="Second"))
-    third = application.tags.create_tag(CreateTag(name="Third"))
-    task = application.tasks.create_task(CreateTask(title="Tagged", tag_ids=(first.id,)))
-    barrier = Barrier(2)
-
-    def replace() -> tuple[str, object]:
-        version = application.tasks.get_task(task.id).version
-        barrier.wait()
-        try:
-            return "replaced", application.tasks.set_task_tags(task.id, (second.id, third.id), version)
-        except (NotFoundError, StaleVersionError) as exc:
-            return type(exc).__name__, exc
-
-    def delete() -> tuple[str, object]:
-        version = application.tags.get_tag(second.id).version
-        barrier.wait()
-        return "deleted", application.tags.delete_tag(second.id, version)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        replace_result, delete_result = list(executor.map(lambda fn: fn(), (replace, delete)))
-
-    assert delete_result[0] == "deleted"
-    stored = _fresh_rows(
-        application,
-        f"SELECT tag_id FROM task_tags WHERE task_id = '{task.id}' ORDER BY tag_id",
-    )
-    stored_ids = tuple(row[0] for row in stored)
-    assert stored_ids in {(first.id,), tuple(sorted((second.id, third.id)))}
-    assert len(stored_ids) == len(set(stored_ids))
-    active = application.tasks.get_task(task.id).tag_ids
-    if replace_result[0] == "replaced":
-        assert stored_ids == tuple(sorted((second.id, third.id)))
-        assert active == (third.id,)
-    else:
-        assert replace_result[0] == "NotFoundError"
-        assert stored_ids == (first.id,)
-        assert active == (first.id,)
-
-    restored = application.tags.restore_tag(
-        second.id, application.tags.get_tag(second.id, include_deleted=True).version
-    )
-    assert restored.deleted_at_utc is None
-    expected_active = tuple(sorted((second.id, third.id))) if replace_result[0] == "replaced" else (first.id,)
-    assert application.tasks.get_task(task.id).tag_ids == expected_active
-
-
-def test_non_root_folder_deletion_relocates_only_direct_tasks(application, clock) -> None:
-    root = application.folders.create_folder(CreateFolder(name="Root"))
-    parent = application.folders.create_folder(CreateFolder(name="Parent", parent_id=root.id))
-    child = application.folders.create_folder(CreateFolder(name="Child", parent_id=parent.id))
-    tag = application.tags.create_tag(CreateTag(name="Keep"))
-    direct = application.tasks.create_task(
-        CreateTask(
-            title="Direct",
-            folder_id=parent.id,
-            tag_ids=(tag.id,),
-            priority="HIGH",
-            start_at_utc=clock.now - timedelta(days=1),
-            due_at_utc=clock.now + timedelta(days=1),
-        )
-    )
-    deleted_direct = application.tasks.create_task(
-        CreateTask(title="Deleted direct", folder_id=parent.id, tag_ids=(tag.id,), priority="LOW")
-    )
-    deleted_direct = application.tasks.delete_task(deleted_direct.id, deleted_direct.version)
-    nested = application.tasks.create_task(
-        CreateTask(title="Nested", folder_id=child.id, tag_ids=(tag.id,), priority="URGENT")
-    )
-    before = {item.id: item for item in (direct, deleted_direct, nested)}
-    clock.now += timedelta(seconds=1)
-    observed = _task_events(application)
-    application.unit_of_work_factory()._event_bus.subscribe("FOLDER_DELETED", observed.append)
-
-    application.folders.delete_folder(parent.id, parent.version)
-
-    current_direct = application.tasks.get_task(direct.id)
-    current_deleted = application.tasks.get_task(deleted_direct.id, include_deleted=True)
-    current_nested = application.tasks.get_task(nested.id)
-    promoted = application.folders.get_folder(child.id)
-    assert promoted.parent_id == root.id
-    for current in (current_direct, current_deleted):
-        previous = before[current.id]
-        assert current.folder_id == root.id
-        assert current.version == previous.version + 1
-        assert current.updated_at_utc == clock.now
-        assert (current.status, current.priority, current.start_at_utc, current.due_at_utc) == (
-            previous.status,
-            previous.priority,
-            previous.start_at_utc,
-            previous.due_at_utc,
-        )
-        assert (current.completed_at_utc, current.cancelled_at_utc, current.deleted_at_utc, current.tag_ids) == (
-            previous.completed_at_utc,
-            previous.cancelled_at_utc,
-            previous.deleted_at_utc,
-            previous.tag_ids,
-        )
-    assert current_nested == before[nested.id]
-    assert [event.event_type for event in observed] == ["FOLDER_DELETED"]
-
-
-def test_folder_deletion_rolls_back_relocation_after_work_begins(application, app_config, monkeypatch) -> None:
-    parent = application.folders.create_folder(CreateFolder(name="Parent"))
-    child = application.folders.create_folder(CreateFolder(name="Child", parent_id=parent.id))
-    note = application.notes.create_note(CreateNote(title="Note", folder_id=parent.id))
-    task = application.tasks.create_task(CreateTask(title="Task", folder_id=parent.id))
-    before_task = application.tasks.get_task(task.id)
-    before_child = application.folders.get_folder(child.id)
-    observed = _task_events(application)
-    application.unit_of_work_factory()._event_bus.subscribe("FOLDER_DELETED", observed.append)
-
-    def fail_after_relocation(*_args, **_kwargs) -> None:
-        raise RuntimeError("injected failure after relocation")
-
-    monkeypatch.setattr(FolderRepository, "reorder", fail_after_relocation)
-    with pytest.raises(RuntimeError, match="after relocation"):
-        application.folders.delete_folder(parent.id, parent.version)
-
-    fresh = create_sqlite_engine(app_config.database.path)
-    try:
-        with fresh.connect() as connection:
-            assert connection.execute(
-                text("SELECT deleted_at_utc FROM folders WHERE id=:id"), {"id": parent.id}
-            ).scalar_one() is None
-            assert connection.execute(
-                text("SELECT folder_id, version, updated_at_utc FROM tasks WHERE id=:id"),
-                {"id": task.id},
-            ).one() == (
-                parent.id,
-                before_task.version,
-                datetime_to_epoch_microseconds(before_task.updated_at_utc),
-            )
-            assert connection.execute(
-                text("SELECT parent_id FROM folders WHERE id=:id"), {"id": child.id}
-            ).scalar_one() == before_child.parent_id
-            assert connection.execute(
-                text("SELECT folder_id FROM notes WHERE id=:id"), {"id": note.id}
-            ).scalar_one() == parent.id
-    finally:
-        fresh.dispose()
-    assert observed == []
-
-
-def test_post_claim_tag_replacement_failure_rolls_back_all_writes(
-    application, app_config, monkeypatch
-) -> None:
-    first = application.tags.create_tag(CreateTag(name="First"))
-    second = application.tags.create_tag(CreateTag(name="Second"))
-    third = application.tags.create_tag(CreateTag(name="Third"))
-    task = application.tasks.create_task(CreateTask(title="Task", tag_ids=(first.id,)))
-    task = application.tasks.complete_task(task.id, task.version)
-    observed = _task_events(application)
-    original_replace = TaskRepository.replace_tags
-
-    def replace_then_fail(self, task_id: str, tag_ids: tuple[str, ...]) -> None:
-        original_replace(self, task_id, tag_ids)
-        raise IntegrityError("injected after task-tag writes", {}, RuntimeError("unexpected"))
-
-    monkeypatch.setattr(TaskRepository, "replace_tags", replace_then_fail)
-    with pytest.raises(IntegrityError, match="injected after task-tag writes"):
-        application.tasks.set_task_tags(task.id, (second.id, third.id), task.version)
-
-    fresh = create_sqlite_engine(app_config.database.path)
-    try:
-        with fresh.connect() as connection:
-            assert connection.execute(
-                text(
-                    "SELECT version, status, updated_at_utc, completed_at_utc, cancelled_at_utc "
-                    "FROM tasks WHERE id=:id"
-                ),
-                {"id": task.id},
-            ).one() == (
-                task.version,
-                "COMPLETED",
-                datetime_to_epoch_microseconds(task.updated_at_utc),
-                datetime_to_epoch_microseconds(task.completed_at_utc),
-                None,
-            )
-            assert connection.execute(
-                text("SELECT tag_id FROM task_tags WHERE task_id=:id ORDER BY tag_id"),
-                {"id": task.id},
-            ).scalars().all() == [first.id]
-    finally:
-        fresh.dispose()
-    assert observed == []
 
 
 def test_today_interval_matrix_uses_non_utc_calendar_boundaries(application, clock) -> None:
@@ -418,8 +220,7 @@ def test_upcoming_and_overdue_complete_boundary_matrices(application, clock) -> 
 
 def test_completed_and_important_views_have_exact_membership_and_order(application, clock) -> None:
     _set_task_ids(application, "completed-moved", "completed-a", "completed-b", "reopened", "cancelled", "deleted-completed", "completed-later", "urgent-a", "urgent-b", "urgent-null", "high", "high-null", "normal", "low", "deleted")
-    folder = application.folders.create_folder(CreateFolder(name="Temporary"))
-    moved = application.tasks.create_task(CreateTask(title="moved", folder_id=folder.id))
+    moved = application.tasks.create_task(CreateTask(title="moved"))
     tie_a = application.tasks.create_task(CreateTask(title="tie a"))
     tie_b = application.tasks.create_task(CreateTask(title="tie b"))
     reopened = application.tasks.create_task(CreateTask(title="reopened"))
@@ -432,7 +233,10 @@ def test_completed_and_important_views_have_exact_membership_and_order(applicati
     deleted_completed = application.tasks.complete_task(deleted_completed.id, deleted_completed.version)
     cancelled = application.tasks.cancel_task(cancelled.id, cancelled.version)
     clock.now += timedelta(seconds=1)
-    application.folders.delete_folder(folder.id, folder.version)
+    # Touching a completed task changes its update time but not its completion time.
+    application.tasks.update_task(
+        moved.id, UpdateTask(expected_version=moved.version, description="touched")
+    )
     reopened = application.tasks.reopen_task(reopened.id, reopened.version)
     application.tasks.delete_task(deleted_completed.id, deleted_completed.version)
     clock.now += timedelta(seconds=1)
@@ -462,9 +266,7 @@ def test_completed_and_important_views_have_exact_membership_and_order(applicati
 
 
 def test_search_filter_sort_and_pagination_contracts(application, clock) -> None:
-    _set_task_ids(application, "a-exact", "b-prefix", "c-substring", "d-description", "e-tie", "f-tie", "g-percent", "h-under", "i-slash", "j-combined", "k-sql", "l-terminal", "m-deleted", "n-folder", "o-root", "p-completed")
-    tag = application.tags.create_tag(CreateTag(name="Filter"))
-    folder = application.folders.create_folder(CreateFolder(name="Folder"))
+    _set_task_ids(application, "a-exact", "b-prefix", "c-substring", "d-description", "e-tie", "f-tie", "g-percent", "h-under", "i-slash", "j-combined", "k-sql", "l-terminal", "m-deleted", "n-dated", "o-root", "p-completed")
     now = clock.now
     exact = application.tasks.create_task(CreateTask(title="needle", due_at_utc=now + timedelta(minutes=4)))
     prefix = application.tasks.create_task(CreateTask(title="needle prefix", due_at_utc=now + timedelta(minutes=3)))
@@ -481,8 +283,8 @@ def test_search_filter_sort_and_pagination_contracts(application, clock) -> None
     terminal = application.tasks.complete_task(terminal.id, terminal.version)
     deleted = application.tasks.create_task(CreateTask(title="needle deleted"))
     application.tasks.delete_task(deleted.id, deleted.version)
-    folder_task = application.tasks.create_task(
-        CreateTask(title="folder", folder_id=folder.id, tag_ids=(tag.id,), priority="HIGH", start_at_utc=now, due_at_utc=now + timedelta(days=1))
+    dated_task = application.tasks.create_task(
+        CreateTask(title="dated", priority="HIGH", start_at_utc=now, due_at_utc=now + timedelta(days=1))
     )
     root_task = application.tasks.create_task(CreateTask(title="root", priority="LOW", start_at_utc=now + timedelta(days=2)))
     completed = application.tasks.create_task(CreateTask(title="complete", priority="NORMAL"))
@@ -533,16 +335,13 @@ def test_search_filter_sort_and_pagination_contracts(application, clock) -> None
         slash.id,
         combined.id,
         sql.id,
-        folder_task.id,
+        dated_task.id,
         root_task.id,
     }
-    assert _ids(application.tasks.list_tasks(TaskQuery(priorities=("HIGH", "LOW")))) == {folder_task.id, root_task.id}
-    assert _ids(application.tasks.list_tasks(TaskQuery(folder_id=folder.id))) == {folder_task.id}
-    assert root_task.id in _ids(application.tasks.list_tasks(TaskQuery(folder_id=None)))
-    assert _ids(application.tasks.list_tasks(TaskQuery(tag_id=tag.id))) == {folder_task.id}
+    assert _ids(application.tasks.list_tasks(TaskQuery(priorities=("HIGH", "LOW")))) == {dated_task.id, root_task.id}
     assert _ids(application.tasks.list_tasks(TaskQuery(start_from_utc=now + timedelta(days=1)))) == {root_task.id}
-    assert _ids(application.tasks.list_tasks(TaskQuery(start_before_utc=now + timedelta(days=1)))) == {folder_task.id}
-    assert _ids(application.tasks.list_tasks(TaskQuery(due_from_utc=now + timedelta(days=1)))) == {folder_task.id}
+    assert _ids(application.tasks.list_tasks(TaskQuery(start_before_utc=now + timedelta(days=1)))) == {dated_task.id}
+    assert _ids(application.tasks.list_tasks(TaskQuery(due_from_utc=now + timedelta(days=1)))) == {dated_task.id}
     assert _ids(application.tasks.list_tasks(TaskQuery(due_before_utc=now + timedelta(days=1)))) == {
         exact.id,
         prefix.id,
@@ -558,8 +357,6 @@ def test_search_filter_sort_and_pagination_contracts(application, clock) -> None
     ) == {terminal.id, completed.id}
     assert deleted.id not in _ids(application.tasks.list_tasks(TaskQuery()))
     assert deleted.id in _ids(application.tasks.list_tasks(TaskQuery(include_deleted=True)))
-    application.tags.delete_tag(tag.id, tag.version)
-    assert application.tasks.list_tasks(TaskQuery(tag_id=tag.id)) == ()
     for kwargs in (
         {"start_from_utc": now, "start_before_utc": now},
         {"due_from_utc": now, "due_before_utc": now},
@@ -651,13 +448,9 @@ def test_all_task_event_ids_and_repository_boolean_claim_contract(application, c
     task = application.tasks.reopen_task(task.id, task.version)
     task = application.tasks.cancel_task(task.id, task.version)
     task = application.tasks.reopen_task(task.id, task.version)
-    folder = application.folders.create_folder(CreateFolder(name="Move"))
-    task = application.tasks.move_task(task.id, folder.id, task.version)
-    tag = application.tags.create_tag(CreateTag(name="Tag"))
-    task = application.tasks.set_task_tags(task.id, (tag.id,), task.version)
     task = application.tasks.delete_task(task.id, task.version)
     task = application.tasks.restore_task(task.id, task.version)
-    assert len(events) == 12
+    assert len(events) == 10
     assert [event.event_type for event in events] == [
         "TASK_CREATED",
         "TASK_UPDATED",
@@ -667,8 +460,6 @@ def test_all_task_event_ids_and_repository_boolean_claim_contract(application, c
         "TASK_REOPENED",
         "TASK_CANCELLED",
         "TASK_REOPENED",
-        "TASK_MOVED",
-        "TASK_TAGS_CHANGED",
         "TASK_DELETED",
         "TASK_RESTORED",
     ]
@@ -679,7 +470,7 @@ def test_all_task_event_ids_and_repository_boolean_claim_contract(application, c
         assert event.payload == {}
         version = int(event.event_id.rsplit(":", 1)[1])
         assert event.event_id == f"task:{event.event_type.lower()}:{task.id}:{version}"
-    assert [int(event.event_id.rsplit(":", 1)[1]) for event in events] == list(range(1, 13))
+    assert [int(event.event_id.rsplit(":", 1)[1]) for event in events] == list(range(1, 11))
 
     with application.unit_of_work_factory() as uow:
         assert uow.tasks is not None
@@ -690,16 +481,15 @@ def test_all_task_event_ids_and_repository_boolean_claim_contract(application, c
 
 
 def test_repository_filters_and_pagination_return_persistence_rows_only(application) -> None:
-    folder = application.folders.create_folder(CreateFolder(name="Repository"))
-    first = application.tasks.create_task(CreateTask(title="first", folder_id=folder.id))
-    second = application.tasks.create_task(CreateTask(title="second", folder_id=folder.id))
-    root = application.tasks.create_task(CreateTask(title="root"))
+    first = application.tasks.create_task(CreateTask(title="first", priority="HIGH"))
+    second = application.tasks.create_task(CreateTask(title="second", priority="HIGH"))
+    other = application.tasks.create_task(CreateTask(title="other"))
 
     with application.unit_of_work_factory() as uow:
         assert uow.tasks is not None
-        folder_rows = uow.tasks.list_tasks(TaskQuery(folder_id=folder.id, sort="title"))
-        root_rows = uow.tasks.list_tasks(TaskQuery(folder_id=None, sort="title"))
-        page = uow.tasks.list_tasks(TaskQuery(folder_id=folder.id, sort="title", limit=1, offset=1))
-        assert [row.id for row in folder_rows] == [first.id, second.id]
-        assert [row.id for row in root_rows] == [root.id]
+        high_rows = uow.tasks.list_tasks(TaskQuery(priorities=("HIGH",), sort="title"))
+        normal_rows = uow.tasks.list_tasks(TaskQuery(priorities=("NORMAL",), sort="title"))
+        page = uow.tasks.list_tasks(TaskQuery(priorities=("HIGH",), sort="title", limit=1, offset=1))
+        assert [row.id for row in high_rows] == [first.id, second.id]
+        assert [row.id for row in normal_rows] == [other.id]
         assert [row.id for row in page] == [second.id]

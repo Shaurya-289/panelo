@@ -4,9 +4,9 @@ from datetime import timedelta
 
 import pytest
 from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import text
 
 from productivity_app.core.exceptions import (
-    InvalidStateTransitionError,
     NotFoundError,
     StaleVersionError,
     ValidationError,
@@ -48,7 +48,7 @@ def test_reminder_create_update_links_history_and_events(application, clock) -> 
     assert {event.event_type for event in events} == {"REMINDER_UPDATED", "REMINDER_CREATED"}
 
 
-def test_reminder_lifecycle_snooze_delete_restore_and_exact_timing(application, clock) -> None:
+def test_reminder_lifecycle_snooze_permanent_delete_and_exact_timing(application, clock) -> None:
     reminder = application.reminders.create_reminder(
         CreateReminder(title="Now", due_at_utc=clock.now, scheduled_timezone="UTC")
     )
@@ -63,14 +63,20 @@ def test_reminder_lifecycle_snooze_delete_restore_and_exact_timing(application, 
     reopened = application.reminders.reopen_reminder(completed.id, completed.version)
     assert reopened.status == "PENDING" and reopened.completed_at_utc is None
     deleted = application.reminders.delete_reminder(reopened.id, reopened.version)
+    assert deleted.id == reopened.id and deleted.title == "Now"
+    # Reminders are deleted for good: there is no Trash entry to read back or restore.
     with pytest.raises(NotFoundError):
         application.reminders.get_reminder(deleted.id)
-    restored = application.reminders.restore_reminder(deleted.id, deleted.version)
-    assert restored.deleted_at_utc is None
-    with pytest.raises(InvalidStateTransitionError):
+    with pytest.raises(NotFoundError):
+        application.reminders.list_reminder_events(deleted.id)
+    assert application.reminders.list_reminders() == ()
+    with application.engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM reminders")) == 0
+        assert connection.scalar(text("SELECT count(*) FROM reminder_events")) == 0
+    with pytest.raises(NotFoundError):
         application.reminders.snooze_reminder(
-            restored.id,
-            SnoozeReminder(expected_version=restored.version, due_at_utc=clock.now + timedelta(minutes=6)),
+            deleted.id,
+            SnoozeReminder(expected_version=deleted.version, due_at_utc=clock.now + timedelta(minutes=6)),
         )
 
 

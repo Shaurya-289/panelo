@@ -32,11 +32,9 @@ from productivity_app.schemas.backups import (
     RestoreBackup,
     ValidateBackup,
 )
-from productivity_app.schemas.folders import CreateFolder, RenameFolder
 from productivity_app.schemas.notes import CreateNote, UpdateNote
 from productivity_app.schemas.reminders import CreateReminder, ReminderPageQuery
 from productivity_app.schemas.search import UnifiedSearchQuery
-from productivity_app.schemas.tags import CreateTag, RenameTag
 from productivity_app.schemas.tasks import CreateTask, UpdateTask
 from productivity_app.schemas.timers import CreateTimer, CreateTimerPreset
 
@@ -115,21 +113,13 @@ def test_double_restore_and_recovery_failure_preserves_both_causes(application, 
 
 @pytest.mark.parametrize(
     "repository_name",
-    ["SettingsRepository", "FoldersRepository", "TagsRepository", "NotesRepository", "TasksRepository", "RemindersRepository", "TimerRepository", "SearchRepository"],
+    ["SettingsRepository", "NoteRepository", "TaskRepository", "ReminderRepository", "TimerRepository", "SearchRepository"],
 )
 def test_uow_initialization_failures_release_lease_and_close_session(application, monkeypatch, repository_name: str) -> None:
-    # The first name is intentionally an alias for the real class spelling.
-    actual_name = "FolderRepository" if repository_name == "FoldersRepository" else "TagRepository" if repository_name == "TagsRepository" else "NoteRepository" if repository_name == "NotesRepository" else "TaskRepository" if repository_name == "TasksRepository" else "TimerRepository" if repository_name == "TimerRepository" else repository_name
-    if actual_name == "SettingsRepository":
-        actual_name = "SettingsRepository"
-    if actual_name == "RemindersRepository":
-        actual_name = "ReminderRepository"
-    if actual_name == "SearchRepository":
-        actual_name = "SearchRepository"
     class Broken:
         def __init__(self, _session: object) -> None:
             raise RuntimeError(repository_name)
-    monkeypatch.setattr(uow_module, actual_name, Broken)
+    monkeypatch.setattr(uow_module, repository_name, Broken)
     with pytest.raises(RuntimeError, match=repository_name):
         application.unit_of_work_factory().__enter__()
     assert application._gate._operations == 0
@@ -189,9 +179,7 @@ def test_search_derived_states_are_read_only(application, clock) -> None:
 
 
 def test_unified_search_covers_all_entities_and_global_tiers(application, clock) -> None:
-    """One query ranks all seven branches, then filters and pages deterministically."""
-    folder = application.folders.create_folder(CreateFolder(name="needle"))
-    tag = application.tags.create_tag(CreateTag(name="needle"))
+    """One query ranks all five branches, then filters and pages deterministically."""
     preset = application.timers.create_preset(CreateTimerPreset(name="needle", duration_ms=10))
     task = application.tasks.create_task(CreateTask(title="needle"))
     note = application.notes.create_note(CreateNote(title="needle", content="body"))
@@ -209,8 +197,6 @@ def test_unified_search_covers_all_entities_and_global_tiers(application, clock)
         ("NOTE", note.id, "title"),
         ("REMINDER", reminder.id, "title"),
         ("TIMER", timer.id, "name"),
-        ("FOLDER", folder.id, "name"),
-        ("TAG", tag.id, "name"),
         ("TIMER_PRESET", preset.id, "name"),
         ("NOTE", prefix.id, "title"),
         ("TIMER", contains.id, "name"),
@@ -399,7 +385,7 @@ def test_restore_expired_timer_reconciles_once_and_reopened_reminder_emits_nothi
     application.restore_backup(RestoreBackup(source_path=application.backups.backup_directory / backup.filename))
     completed = [event for event in published if event.event_type == "TIMER_COMPLETED"]
     assert len(completed) == 1 and completed[0].entity_id == expired.id
-    assert application.timers.reconcile_expired_timer() is None
+    assert application.timers.reconcile_expired_timers() == ()
     assert len([event for event in published if event.event_type == "TIMER_COMPLETED"]) == 1
     restored_timer = application.timers.get_timer(expired.id)
     restored_reminder = application.reminders.get_reminder(reminder.id)
@@ -420,10 +406,8 @@ def test_reminder_restore_derives_overdue_without_mutation(application, clock) -
 
 
 def test_representative_restore_restores_relationships_history_and_removes_later_data(application, clock) -> None:
-    folder = application.folders.create_folder(CreateFolder(name="Folder"))
-    tag = application.tags.create_tag(CreateTag(name="Tag"))
-    note = application.notes.create_note(CreateNote(title="Note", content="body", folder_id=folder.id, tag_ids=(tag.id,)))
-    task = application.tasks.create_task(CreateTask(title="Task", folder_id=folder.id, tag_ids=(tag.id,)))
+    note = application.notes.create_note(CreateNote(title="Note", content="body", color="amber"))
+    task = application.tasks.create_task(CreateTask(title="Task", due_has_time=False))
     reminder = application.reminders.create_reminder(CreateReminder(title="Reminder", due_at_utc=clock.now + timedelta(hours=1), scheduled_timezone="UTC", task_id=task.id))
     preset = application.timers.create_preset(CreateTimerPreset(name="Preset", duration_ms=1_000))
     timer = application.timers.create_timer(CreateTimer(name="Timer", preset_id=preset.id, task_id=task.id))
@@ -432,32 +416,12 @@ def test_representative_restore_restores_relationships_history_and_removes_later
     application.timers.complete_timer(timer.id, timer.version)
     backup = application.backups.create_backup()
     application.notes.update_note(note.id, UpdateNote(expected_version=note.version, title="Changed"))
-    application.folders.rename_folder(
-        folder.id, RenameFolder(name="Changed Folder", expected_version=folder.version)
-    )
-    application.tags.rename_tag(tag.id, RenameTag(name="Changed Tag", expected_version=tag.version))
     later = application.tasks.create_task(CreateTask(title="Later"))
     application.restore_backup(RestoreBackup(source_path=application.backups.backup_directory / backup.filename))
     restored_note = application.notes.get_note(note.id)
     restored_task = application.tasks.get_task(task.id)
-    assert (restored_note.title, restored_note.folder_id, restored_note.tag_ids) == ("Note", folder.id, (tag.id,))
-    assert (restored_task.folder_id, restored_task.tag_ids) == (folder.id, (tag.id,))
-    restored_folder = application.folders.get_folder(folder.id)
-    restored_tag = application.tags.get_tag(tag.id)
-    assert (
-        restored_folder.id,
-        restored_folder.name,
-        restored_folder.parent_id,
-        restored_folder.sort_order,
-        restored_folder.version,
-        restored_folder.deleted_at_utc,
-    ) == (folder.id, "Folder", None, folder.sort_order, folder.version, None)
-    assert (
-        restored_tag.id,
-        restored_tag.name,
-        restored_tag.version,
-        restored_tag.deleted_at_utc,
-    ) == (tag.id, "Tag", tag.version, None)
+    assert (restored_note.title, restored_note.color) == ("Note", "amber")
+    assert restored_task.due_has_time is False
     assert application.reminders.get_reminder(reminder.id).task_id == task.id
     reminder_events = application.reminders.list_reminder_events(reminder.id, ReminderPageQuery())
     assert [(event.event_type, event.previous_status, event.new_status) for event in reminder_events] == [
@@ -663,14 +627,14 @@ def test_post_replacement_bootstrap_failures_restore_exact_safety_state(
         monkeypatch.setattr(SettingsService, "get_settings", fail_once)
     else:
         from productivity_app.services.timers import TimerService
-        original_reconcile = TimerService.reconcile_expired_timer
+        original_reconcile = TimerService.reconcile_expired_timers
         def fail_once(self):  # type: ignore[no-untyped-def]
             nonlocal calls
             calls += 1
             if calls == 1:
                 raise RuntimeError("timer reconciliation")
             return original_reconcile(self)
-        monkeypatch.setattr(TimerService, "reconcile_expired_timer", fail_once)
+        monkeypatch.setattr(TimerService, "reconcile_expired_timers", fail_once)
 
     with pytest.raises(BackupRestoreError):
         application.restore_backup(RestoreBackup(source_path=application.backups.backup_directory / replacement_backup.filename))
@@ -928,7 +892,7 @@ def test_backup_validation_rejects_schema_and_revision_variants_without_live_mut
         elif mutation == "future_revision":
             connection.execute("UPDATE alembic_version SET version_num = '20991231_9999'")
         elif mutation == "drop_required_table":
-            connection.execute("DROP TABLE task_tags")
+            connection.execute("DROP TABLE timer_runs")
         elif mutation == "add_unexpected_table":
             connection.execute("CREATE TABLE unexpected_phase5_table (id INTEGER)")
         elif mutation == "drop_required_column":
@@ -947,7 +911,10 @@ def test_backup_validation_rejects_foreign_key_violation_and_unrelated_database(
     source = _copied_valid_backup(application, tmp_path, "bad-foreign-key.sqlite3")
     with sqlite3.connect(source) as connection:
         connection.execute("PRAGMA foreign_keys=OFF")
-        connection.execute("UPDATE tasks SET folder_id = 'missing-folder' WHERE id = ?", (task.id,))
+        connection.execute(
+            "INSERT INTO reminder_events (id, reminder_id, event_type, occurred_at_utc) "
+            "VALUES ('orphan-event', 'missing-reminder', 'X', 1)"
+        )
     with pytest.raises(BackupValidationError):
         application.backups.validate_backup(ValidateBackup(source_path=source))
 
@@ -964,7 +931,7 @@ def test_backup_validation_accepts_current_revision_without_migration(applicatio
     validated = application.backups.validate_backup(
         ValidateBackup(source_path=application.backups.backup_directory / backup.filename)
     )
-    assert validated.schema_revision == "20261002_0002"
+    assert validated.schema_revision == "20261103_0003"
 
 
 def test_backup_snapshots_never_contain_half_multi_row_transaction(application) -> None:
@@ -979,14 +946,11 @@ def test_backup_snapshots_never_contain_half_multi_row_transaction(application) 
             with application.unit_of_work_factory() as uow:
                 uow.acquire_write_lock()
                 assert uow.session is not None
-                uow.session.execute(text(
-                    "INSERT INTO folders (id, name, normalized_name, parent_id, sort_order, created_at_utc, updated_at_utc, version, deleted_at_utc) "
-                    "VALUES ('txn-folder', 'txn folder', 'txn folder', NULL, 0, 1, 1, 1, NULL)"
-                ))
-                uow.session.execute(text(
-                    "INSERT INTO tasks (id, title, description, status, priority, folder_id, start_at_utc, due_at_utc, completed_at_utc, cancelled_at_utc, created_at_utc, updated_at_utc, version, deleted_at_utc) "
-                    "VALUES ('txn-task', 'txn task', '', 'TODO', 'NORMAL', 'txn-folder', NULL, NULL, NULL, NULL, 1, 1, 1, NULL)"
-                ))
+                for suffix in ("a", "b"):
+                    uow.session.execute(text(
+                        "INSERT INTO tasks (id, title, description, status, priority, start_at_utc, due_at_utc, completed_at_utc, cancelled_at_utc, created_at_utc, updated_at_utc, version, deleted_at_utc) "
+                        f"VALUES ('txn-task-{suffix}', 'txn task', '', 'TODO', 'NORMAL', NULL, NULL, NULL, NULL, 1, 1, 1, NULL)"
+                    ))
                 entered.set()
                 assert release.wait(10)
                 uow.commit()
@@ -1006,9 +970,8 @@ def test_backup_snapshots_never_contain_half_multi_row_transaction(application) 
     artifact = application.backups.backup_directory / created[0].filename
     application.backups.validate_backup(ValidateBackup(source_path=artifact))
     with sqlite3.connect(artifact) as connection:
-        folder_count = connection.execute("SELECT count(*) FROM folders WHERE id = 'txn-folder'").fetchone()[0]
-        task_count = connection.execute("SELECT count(*) FROM tasks WHERE id = 'txn-task'").fetchone()[0]
-        assert (folder_count, task_count) in {(0, 0), (1, 1)}
+        task_count = connection.execute("SELECT count(*) FROM tasks WHERE id LIKE 'txn-task-%'").fetchone()[0]
+        assert task_count in {0, 2}
 
 
 def test_restore_rejects_while_a_real_uow_is_held_then_succeeds(application) -> None:
@@ -1184,31 +1147,20 @@ def test_service_write_held_in_a_uow_blocks_restore_without_partial_commit(appli
     assert application.tasks.get_task(task.id).title == "before write gate"
 
 
-def test_backup_concurrent_with_note_and_tag_relationship_commit_is_atomic(application) -> None:
-    before_folder = application.folders.create_folder(CreateFolder(name="before folder"))
-    after_folder = application.folders.create_folder(CreateFolder(name="after folder"))
-    before_tag = application.tags.create_tag(CreateTag(name="before tag"))
-    after_tag = application.tags.create_tag(CreateTag(name="after tag"))
-    note = application.notes.create_note(
-        CreateNote(title="before", content="before", folder_id=before_folder.id, tag_ids=(before_tag.id,))
-    )
+def test_backup_concurrent_with_multi_column_note_commit_is_atomic(application) -> None:
+    note = application.notes.create_note(CreateNote(title="before", content="before"))
     entered, release = Event(), Event()
     backups: list[object] = []
     errors: list[BaseException] = []
 
-    def write_all_related_state() -> None:
+    def write_all_note_state() -> None:
         try:
             with application.unit_of_work_factory() as uow:
                 assert uow.session is not None
                 uow.acquire_write_lock()
                 uow.session.execute(
-                    text("UPDATE notes SET title = :title, content = :content, folder_id = :folder WHERE id = :id"),
-                    {"title": "after", "content": "after", "folder": after_folder.id, "id": note.id},
-                )
-                uow.session.execute(text("DELETE FROM note_tags WHERE note_id = :id"), {"id": note.id})
-                uow.session.execute(
-                    text("INSERT INTO note_tags (note_id, tag_id) VALUES (:note, :tag)"),
-                    {"note": note.id, "tag": after_tag.id},
+                    text("UPDATE notes SET title = :title, content = :content, color = :color WHERE id = :id"),
+                    {"title": "after", "content": "after", "color": "teal", "id": note.id},
                 )
                 entered.set()
                 assert release.wait(10)
@@ -1216,7 +1168,7 @@ def test_backup_concurrent_with_note_and_tag_relationship_commit_is_atomic(appli
         except BaseException as exc:
             errors.append(exc)
 
-    writer = Thread(target=write_all_related_state)
+    writer = Thread(target=write_all_note_state)
     writer.start()
     assert entered.wait(10)
 
@@ -1237,21 +1189,13 @@ def test_backup_concurrent_with_note_and_tag_relationship_commit_is_atomic(appli
     connection = sqlite3.connect(artifact)
     try:
         row = connection.execute(
-            "SELECT title, content, folder_id FROM notes WHERE id = ?", (note.id,)
+            "SELECT title, content, color FROM notes WHERE id = ?", (note.id,)
         ).fetchone()
-        tags = tuple(
-            item[0] for item in connection.execute(
-                "SELECT tag_id FROM note_tags WHERE note_id = ? ORDER BY tag_id", (note.id,)
-            )
-        )
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()
-    assert (row, tags) in {
-        (("before", "before", before_folder.id), (before_tag.id,)),
-        (("after", "after", after_folder.id), (after_tag.id,)),
-    }
+    assert row in {("before", "before", "none"), ("after", "after", "teal")}
 
 
 def test_captured_task_repository_cannot_write_after_uow_exit(application, clock) -> None:

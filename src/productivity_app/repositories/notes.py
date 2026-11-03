@@ -1,4 +1,4 @@
-"""Persistence queries for notes and note-tag associations."""
+"""Persistence queries for notes."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from sqlalchemy import case, delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
-from productivity_app.db.models.initial import Note, Tag, note_tags
+from productivity_app.db.models.initial import Note
 from productivity_app.schemas.notes import NoteQuery
 
 
@@ -23,32 +23,21 @@ class NoteRepository:
     def add(self, note: Note) -> None:
         self._session.add(note)
 
-    def tag_ids(self, note_id: str, *, active_only: bool = True) -> tuple[str, ...]:
-        query = select(note_tags.c.tag_id).where(note_tags.c.note_id == note_id)
-        if active_only:
-            query = query.join(Tag, Tag.id == note_tags.c.tag_id).where(
-                Tag.deleted_at_utc.is_(None)
-            )
-        return tuple(self._session.scalars(query.order_by(note_tags.c.tag_id)))
+    def list_deleted(self, *, deleted_through_utc: datetime | None = None) -> list[Note]:
+        """Soft-deleted notes, newest deletion first (optionally only those deleted by an instant)."""
+        query = select(Note).where(Note.deleted_at_utc.is_not(None))
+        if deleted_through_utc is not None:
+            query = query.where(Note.deleted_at_utc <= deleted_through_utc)
+        return list(self._session.scalars(query.order_by(Note.deleted_at_utc.desc(), Note.id)))
 
-    def replace_tags(self, note_id: str, tag_ids: tuple[str, ...]) -> None:
-        self._session.execute(delete(note_tags).where(note_tags.c.note_id == note_id))
-        if tag_ids:
-            self._session.execute(
-                note_tags.insert(), [{"note_id": note_id, "tag_id": tag_id} for tag_id in tag_ids]
-            )
+    def delete(self, note_id: str) -> None:
+        """Remove the row for good (the caller clears reminder links first)."""
+        self._session.execute(delete(Note).where(Note.id == note_id))
 
     def list_notes(self, query_data: NoteQuery) -> list[Note]:
         query = select(Note)
         if not query_data.include_deleted:
             query = query.where(Note.deleted_at_utc.is_(None))
-        if query_data.folder_id is not None:
-            query = query.where(Note.folder_id == query_data.folder_id)
-        if query_data.tag_id is not None:
-            query = query.join(note_tags).join(Tag, Tag.id == note_tags.c.tag_id).where(
-                note_tags.c.tag_id == query_data.tag_id,
-                Tag.deleted_at_utc.is_(None),
-            )
         if query_data.is_pinned is not None:
             query = query.where(Note.is_pinned == query_data.is_pinned)
         if query_data.is_archived is not None:

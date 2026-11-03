@@ -39,10 +39,10 @@ class CreateTask(_TaskModel):
     title: str = Field(min_length=1, max_length=300)
     description: str = Field(default="", max_length=100_000)
     priority: TaskPriorityValue = "NORMAL"
-    folder_id: str | None = None
-    tag_ids: tuple[str, ...] = ()
     start_at_utc: datetime | None = None
     due_at_utc: datetime | None = None
+    # False: a date-only task, stored as local midnight of its day.
+    due_has_time: bool = True
 
     @field_validator("title", mode="before")
     @classmethod
@@ -75,9 +75,9 @@ class UpdateTask(_TaskModel):
     title: str | None = Field(default=None, max_length=300)
     description: str | None = Field(default=None, max_length=100_000)
     priority: TaskPriorityValue | None = None
-    folder_id: str | None = None
     start_at_utc: datetime | None = None
     due_at_utc: datetime | None = None
+    due_has_time: bool | None = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -100,8 +100,6 @@ class UpdateTask(_TaskModel):
 class TaskQuery(_TaskModel):
     statuses: tuple[TaskStatusValue, ...] = ()
     priorities: tuple[TaskPriorityValue, ...] = ()
-    folder_id: str | None = None
-    tag_id: str | None = None
     start_from_utc: datetime | None = None
     start_before_utc: datetime | None = None
     due_from_utc: datetime | None = None
@@ -188,10 +186,9 @@ class TaskSummary(_TaskModel):
     title: str
     status: TaskStatusValue
     priority: TaskPriorityValue
-    folder_id: str | None
-    tag_ids: tuple[str, ...]
     start_at_utc: datetime | None
     due_at_utc: datetime | None
+    due_has_time: bool
     completed_at_utc: datetime | None
     cancelled_at_utc: datetime | None
     created_at_utc: datetime

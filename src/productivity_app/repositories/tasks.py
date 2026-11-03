@@ -1,4 +1,4 @@
-"""Persistence queries for tasks and task-tag associations."""
+"""Persistence queries for tasks."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from sqlalchemy import case, delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
-from productivity_app.db.models.initial import Tag, Task, task_tags
+from productivity_app.db.models.initial import Task
 from productivity_app.schemas.tasks import TaskQuery
 
 _ACTIVE = ("TODO", "IN_PROGRESS")
@@ -42,18 +42,16 @@ class TaskRepository:
     def add(self, task: Task) -> None:
         self._session.add(task)
 
-    def tag_ids(self, task_id: str, *, active_only: bool = True) -> tuple[str, ...]:
-        query = select(task_tags.c.tag_id).where(task_tags.c.task_id == task_id)
-        if active_only:
-            query = query.join(Tag, Tag.id == task_tags.c.tag_id).where(Tag.deleted_at_utc.is_(None))
-        return tuple(self._session.scalars(query.order_by(task_tags.c.tag_id)))
+    def list_deleted(self, *, deleted_through_utc: datetime | None = None) -> list[Task]:
+        """Soft-deleted tasks, newest deletion first (optionally only those deleted by an instant)."""
+        query = select(Task).where(Task.deleted_at_utc.is_not(None))
+        if deleted_through_utc is not None:
+            query = query.where(Task.deleted_at_utc <= deleted_through_utc)
+        return list(self._session.scalars(query.order_by(Task.deleted_at_utc.desc(), Task.id)))
 
-    def replace_tags(self, task_id: str, tag_ids: tuple[str, ...]) -> None:
-        self._session.execute(delete(task_tags).where(task_tags.c.task_id == task_id))
-        if tag_ids:
-            self._session.execute(
-                task_tags.insert(), [{"task_id": task_id, "tag_id": tag_id} for tag_id in tag_ids]
-            )
+    def delete(self, task_id: str) -> None:
+        """Remove the row for good (the caller clears reminder links first)."""
+        self._session.execute(delete(Task).where(Task.id == task_id))
 
     def claim_version(
         self, task_id: str, expected_version: int, now_utc: datetime, *, deleted: bool
@@ -81,12 +79,6 @@ class TaskRepository:
             query = query.where(Task.status.in_(data.statuses))
         if data.priorities:
             query = query.where(Task.priority.in_(data.priorities))
-        if "folder_id" in data.model_fields_set:
-            query = query.where(Task.folder_id == data.folder_id)
-        if data.tag_id is not None:
-            query = query.join(task_tags).join(Tag, Tag.id == task_tags.c.tag_id).where(
-                task_tags.c.tag_id == data.tag_id, Tag.deleted_at_utc.is_(None)
-            )
         for column, lower, upper in (
             (Task.start_at_utc, data.start_from_utc, data.start_before_utc),
             (Task.due_at_utc, data.due_from_utc, data.due_before_utc),

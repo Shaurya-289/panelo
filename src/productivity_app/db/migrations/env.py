@@ -46,17 +46,31 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     event.listen(connectable, "connect", _configure_sqlite_connection)
-    # SQLite's DDL can auto-commit, but Alembic's version-table update still needs
-    # an explicit owning transaction so it is durable when the connection closes.
-    with connectable.begin() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            render_as_batch=True,
-            transactional_ddl=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    with connectable.connect() as connection:
+        # SQLite rebuilds a table by dropping the old one, and with enforcement on that
+        # drop fires every child table's ON DELETE action (cascading deletes, nulling links).
+        # The pragma is a no-op inside a transaction, so it is switched off first; integrity
+        # is checked explicitly before the commit instead.
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+        with connection.begin():
+            # pysqlite does not open a transaction for DDL, which would leave a migration that
+            # fails half-way partly applied.  Start one explicitly so the schema changes, the
+            # data copies and the version stamp commit or roll back together.
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                render_as_batch=True,
+                transactional_ddl=True,
+            )
+            with context.begin_transaction():
+                context.run_migrations()
+            violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(
+                    f"Migration left {len(violations)} foreign key violation(s); rolled back."
+                )
 
 
 if context.is_offline_mode():

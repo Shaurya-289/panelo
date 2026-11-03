@@ -126,6 +126,8 @@ class TimerQuery(TimerPageQuery):
     ended_from_utc: datetime | None = None
     ended_before_utc: datetime | None = None
     include_deleted: bool = False
+    # Leave out the timers that belong to a Focus/Pomodoro session (they have their own view).
+    exclude_focus: bool = False
     sort: TimerSort = "updated_newest"
 
     @field_validator("states", "effective_states")

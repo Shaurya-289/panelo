@@ -133,6 +133,7 @@ def _summary(reminder: Reminder, now: datetime, times_done: int = 0) -> Reminder
     return ReminderSummary(
         id=reminder.id,
         title=reminder.title,
+        message=reminder.message,
         status=cast(ReminderStatusValue, reminder.status),
         timing_state=_timing_state(reminder, now),
         due_at_utc=reminder.due_at_utc,
@@ -159,9 +160,7 @@ def _summary(reminder: Reminder, now: datetime, times_done: int = 0) -> Reminder
 
 
 def _view(reminder: Reminder, now: datetime, times_done: int = 0) -> ReminderView:
-    return ReminderView(
-        **_summary(reminder, now, times_done).model_dump(), message=reminder.message
-    )
+    return ReminderView(**_summary(reminder, now, times_done).model_dump())
 
 
 def _event_view(event: ReminderEvent) -> ReminderEventView:

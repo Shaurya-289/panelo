@@ -16,6 +16,9 @@ dependencies = [
   "tzdata>=2025.2,<2027",
 ]
 
+[project.gui-scripts]
+productivity-app = "productivity_app.desktop.main:main"
+
 [dependency-groups]
 dev = [
   "mypy>=1.13,<2",
@@ -26,6 +29,11 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/productivity_app"]
+# The QML pages, their JavaScript helpers and the font are data files inside the package.
+artifacts = [
+  "src/productivity_app/ui/qml/**/*",
+  "src/productivity_app/ui/fonts/*",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --cov=productivity_app --cov-report=term-missing"
@@ -49,3 +57,19 @@ exclude = ["src/productivity_app/db/migrations"]
 [[tool.mypy.overrides]]
 module = ["alembic.*"]
 ignore_missing_imports = true
+
+# The self-test steps are test scripts driving QML windows through untyped Qt objects.
+[[tool.mypy.overrides]]
+module = [
+  "productivity_app.ui.selftest.steps_core",
+  "productivity_app.ui.selftest.steps_layout",
+  "productivity_app.ui.selftest.steps_round7",
+  "productivity_app.ui.selftest.steps_views",
+  "productivity_app.ui.selftest.unit_checks",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
+disable_error_code = ["func-returns-value", "call-overload", "arg-type", "attr-defined", "no-any-return", "union-attr", "return-value"]

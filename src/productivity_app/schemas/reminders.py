@@ -245,6 +245,7 @@ class ReminderSummary(_ReminderModel):
 
     id: str
     title: str
+    message: str
     status: ReminderStatusValue
     timing_state: ReminderTimingValue | None
     due_at_utc: datetime
@@ -267,7 +268,7 @@ class ReminderSummary(_ReminderModel):
 
 
 class ReminderView(ReminderSummary):
-    message: str
+    pass
 
 
 class ReminderEventView(_ReminderModel):

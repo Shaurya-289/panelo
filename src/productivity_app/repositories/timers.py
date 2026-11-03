@@ -10,6 +10,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from productivity_app.db.models.initial import Timer, TimerPreset, TimerRun
+from productivity_app.db.models.pomodoro import FocusSession
 from productivity_app.schemas.timers import TimerPresetQuery, TimerQuery, TimerRunQuery
 
 
@@ -110,6 +111,10 @@ class TimerRepository:
             query = query.where(Timer.ended_at_utc >= data.ended_from_utc)
         if data.ended_before_utc is not None:
             query = query.where(Timer.ended_at_utc < data.ended_before_utc)
+        if data.exclude_focus:
+            query = query.where(
+                ~select(FocusSession.id).where(FocusSession.timer_id == Timer.id).exists()
+            )
         return list(
             self._session.scalars(
                 query.order_by(*self._timer_order(data.sort, now_utc))

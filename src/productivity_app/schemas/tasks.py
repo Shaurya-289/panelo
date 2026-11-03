@@ -184,6 +184,7 @@ class TaskSummary(_TaskModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str
     title: str
+    description: str
     status: TaskStatusValue
     priority: TaskPriorityValue
     start_at_utc: datetime | None
@@ -198,4 +199,4 @@ class TaskSummary(_TaskModel):
 
 
 class TaskView(TaskSummary):
-    description: str
+    pass

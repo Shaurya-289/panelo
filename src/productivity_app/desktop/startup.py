@@ -73,10 +73,16 @@ def build_startup_command(launcher: Path) -> str:
     return command
 
 
+GUI_SCRIPT = "productivity-app.exe"
+
+
 def default_launcher() -> Path | None:
-    if not getattr(sys, "frozen", False):
-        return None
-    candidate = Path(sys.executable).resolve()
+    """The program Windows should start at sign-in: the frozen executable, or the installed
+    ``productivity-app`` GUI script next to the interpreter.  ``None`` when there is neither."""
+    if getattr(sys, "frozen", False):
+        candidate = Path(sys.executable).resolve()
+    else:
+        candidate = Path(sys.executable).resolve().parent / GUI_SCRIPT
     return candidate if candidate.is_file() else None
 
 

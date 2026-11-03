@@ -86,6 +86,7 @@ def _summary(task: Task) -> TaskSummary:
     return TaskSummary(
         id=task.id,
         title=task.title,
+        description=task.description,
         status=cast(TaskStatusValue, task.status),
         priority=cast(TaskPriorityValue, task.priority),
         start_at_utc=task.start_at_utc,

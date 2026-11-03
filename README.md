@@ -14,6 +14,24 @@ The UI has two modes:
   Settings, over a blurred copy of the desktop wallpaper. Double-click an overlay panel header to
   morph the overlay into the Full App.
 
+## Screenshots
+
+**Quick overlay** (Ctrl+Alt+Space)
+
+![Quick overlay](docs/screenshots/overlay.png)
+
+**Full App: notes**
+
+![Notes](docs/screenshots/notes.png)
+
+| Tasks | Reminders |
+|---|---|
+| ![Tasks](docs/screenshots/tasks.png) | ![Reminders](docs/screenshots/reminders.png) |
+| **Focus and timers** | **Overlay layouts** |
+| ![Focus](docs/screenshots/focus.png) | ![Overlay layouts](docs/screenshots/overlay-layouts.png) |
+
+<sub>Screenshots show sample data from the built-in self-test.</sub>
+
 ## Status
 
 | Part | Status |

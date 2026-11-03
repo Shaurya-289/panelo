@@ -20,9 +20,13 @@ from tests.conftest import FakeClock
 
 
 @pytest.fixture(scope="session")
-def qapp() -> QApplication:
+def qapp() -> Iterator[QApplication]:
     existing = QApplication.instance()
-    return existing if isinstance(existing, QApplication) else QApplication(["tests"])
+    app = existing if isinstance(existing, QApplication) else QApplication(["tests"])
+    yield app
+    # Clipboard data left behind at interpreter exit crashes Qt's teardown (exit code 139).
+    app.clipboard().clear()
+    app.processEvents()
 
 
 @pytest.fixture

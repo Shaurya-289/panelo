@@ -11,11 +11,9 @@ from uuid import uuid4
 
 import pytest
 from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtGui import QCloseEvent
 from PySide6.QtNetwork import QLocalSocket
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.desktop.controller import QuitResult, ShellController
 from productivity_app.desktop.errors import PlatformNotSupportedError, SingleInstanceError
 from productivity_app.desktop.instance import (
     ActivationResponse,
@@ -24,9 +22,7 @@ from productivity_app.desktop.instance import (
     parse_activation_request,
 )
 from productivity_app.desktop.main import DesktopOptions, parse_desktop_options, run_desktop
-from productivity_app.desktop.tray import ShellTray
-from productivity_app.desktop.window import ShellWindow
-from productivity_app.windows.mutex import MutexLease, build_instance_identity
+from productivity_app.windows.mutex import build_instance_identity
 
 
 @dataclass
@@ -65,74 +61,10 @@ class _Mutex:
         self.close_count += 1
 
 
-class _Window:
-    def __init__(self) -> None:
-        self.hidden = True
-        self.minimized = False
-        self.show_count = 0
-        self.normal_count = 0
-        self.raise_count = 0
-        self.activate_count = 0
-
-    def isHidden(self) -> bool:
-        return self.hidden
-
-    def isMinimized(self) -> bool:
-        return self.minimized
-
-    def show(self) -> None:
-        self.hidden = False
-        self.show_count += 1
-
-    def showNormal(self) -> None:
-        self.hidden = False
-        self.minimized = False
-        self.normal_count += 1
-
-    def raise_(self) -> None:
-        self.raise_count += 1
-
-    def activateWindow(self) -> None:
-        self.activate_count += 1
-
-    def hide(self) -> None:
-        self.hidden = True
 
 
-class _Tray:
-    def __init__(self, available: bool = True) -> None:
-        self.available = available
-        self.show_count = 0
-        self.hide_count = 0
-        self.close_count = 0
-
-    def show(self) -> None:
-        self.show_count += 1
-
-    def hide(self) -> None:
-        self.hide_count += 1
-
-    def close(self) -> None:
-        self.close_count += 1
 
 
-def _controller(
-    qapplication: QApplication,
-    *,
-    minimize_to_tray: bool = True,
-    tray_available: bool = True,
-    close_error: Exception | None = None,
-) -> tuple[ShellController, _Backend, _Window, _Tray, _Mutex]:
-    backend = _Backend(minimize_to_tray=minimize_to_tray, close_error=close_error)
-    window, tray, mutex = _Window(), _Tray(tray_available), _Mutex()
-    controller = ShellController(
-        backend,
-        qapplication,
-        cast(MutexLease, mutex),
-        window=cast(Any, window),
-        tray=cast(Any, tray),
-    )
-    return controller, backend, window, tray, mutex
 
 
 @pytest.mark.parametrize(
@@ -310,156 +242,24 @@ def test_activation_client_fails_after_bounded_not_ready_wait(qapplication: QApp
         server.close()
 
 
-def test_controller_show_hide_and_restore_use_one_central_path(qapplication: QApplication) -> None:
-    controller, _backend, window, _tray, _mutex = _controller(qapplication)
-    controller.show_window()
-    assert window.show_count == window.raise_count == window.activate_count == 1
-    window.minimized = True
-    controller.activate_window()
-    assert window.normal_count == 1
-    controller.hide_window()
-    assert window.hidden is True
 
 
-def test_startup_visibility_uses_tray_and_current_minimize_policy(qapplication: QApplication) -> None:
-    hidden, _backend, hidden_window, hidden_tray, _mutex = _controller(qapplication)
-    hidden.start(start_hidden=True)
-    assert hidden_window.hidden is True
-    assert hidden_window.show_count == 0
-    assert hidden_tray.show_count == 1
-
-    visible, _backend, visible_window, visible_tray, _mutex = _controller(qapplication)
-    visible.start(start_hidden=False)
-    assert visible_window.hidden is False
-    assert visible_window.show_count == 1
-    assert visible_tray.show_count == 1
 
 
-def test_window_policy_hides_only_when_setting_and_tray_allow_it(qapplication: QApplication) -> None:
-    controller, backend, window, _tray, _mutex = _controller(qapplication)
-    assert controller._on_window_close() is True
-    assert window.hidden is True
-    controller._on_window_minimized()
-    assert backend.close_count == 0
-
-    fake_qapp = _QtApplication()
-    unavailable, unavailable_backend, _window, _tray, _mutex = _controller(
-        cast(Any, fake_qapp), tray_available=False
-    )
-    assert unavailable._on_window_close() is False
-    assert unavailable_backend.close_count == 1
-
-    ordinary, ordinary_backend, _window, _tray, _mutex = _controller(
-        cast(Any, _QtApplication()), minimize_to_tray=False
-    )
-    assert ordinary._on_window_close() is False
-    assert ordinary_backend.close_count == 1
 
 
-def test_quit_closes_backend_once_and_releases_mutex_last(qapplication: QApplication) -> None:
-    controller, backend, _window, tray, mutex = _controller(cast(Any, _QtApplication()))
-    controller.quit_application()
-    controller.quit_application()
-    assert backend.close_count == 1
-    assert tray.close_count == 1
-    assert mutex.closed is True
-    assert controller.is_closed is True
 
 
-def test_close_failure_leaves_shell_usable(qapplication: QApplication) -> None:
-    controller, backend, window, tray, mutex = _controller(qapplication, close_error=RuntimeError("busy"))
-    controller.quit_application()
-    assert backend.close_count == 1
-    assert controller.is_quiescing is False
-    assert controller.is_closed is False
-    assert tray.close_count == 0
-    assert mutex.closed is False
-    controller.show_window()
-    assert window.activate_count == 1
 
 
-def test_real_window_close_is_ignored_when_backend_shutdown_is_rejected(qapplication: QApplication) -> None:
-    controller, backend, _window, tray, mutex = _controller(
-        qapplication, tray_available=False, close_error=RuntimeError("active work")
-    )
-    window = ShellWindow(controller._on_window_close, controller._on_window_minimized)
-    controller.window = window
-    event = QCloseEvent()
-    window.closeEvent(event)
-    assert event.isAccepted() is False
-    assert backend.close_count == 1
-    assert mutex.closed is False
-    assert tray.close_count == 0
-    controller.show_window()
-    assert window.isVisible() is True
 
 
-class _Signal:
-    def __init__(self) -> None:
-        self.callback: Any | None = None
-
-    def connect(self, callback: Any) -> None:
-        self.callback = callback
 
 
-class _QtApplication:
-    def __init__(self) -> None:
-        self.aboutToQuit = _Signal()
-        self.quit_count = 0
-
-    def setQuitOnLastWindowClosed(self, _value: bool) -> None:
-        return None
-
-    def quit(self) -> None:
-        self.quit_count += 1
 
 
-def test_quit_is_preflight_gated_and_about_to_quit_cleanup_is_idempotent() -> None:
-    qapp = _QtApplication()
-    backend = _Backend()
-    mutex = _Mutex()
-    window, tray = _Window(), _Tray()
-    controller = ShellController(
-        backend,
-        cast(Any, qapp),
-        cast(MutexLease, mutex),
-        window=cast(Any, window),
-        tray=cast(Any, tray),
-    )
-    assert controller.request_quit() is QuitResult.SUCCESS
-    assert qapp.quit_count == 1
-    assert backend.close_count == 1
-    controller._about_to_quit()
-    controller._about_to_quit()
-    assert backend.close_count == 1
-    assert mutex.close_count == 1
-
-    rejected_qapp = _QtApplication()
-    rejected_backend = _Backend(close_error=RuntimeError("busy"))
-    rejected = ShellController(
-        rejected_backend,
-        cast(Any, rejected_qapp),
-        cast(MutexLease, _Mutex()),
-        window=cast(Any, _Window()),
-        tray=cast(Any, _Tray()),
-    )
-    assert rejected.request_quit() is QuitResult.REJECTED
-    assert rejected_qapp.quit_count == 0
-    assert rejected_backend.close_count == 1
-    rejected._about_to_quit()
-    assert rejected_backend.close_count == 1
 
 
-def test_shell_tray_menu_routes_actions_once_and_never_uses_messages(qapplication: QApplication) -> None:
-    calls: list[str] = []
-    tray = ShellTray(lambda: calls.append("open"), lambda: calls.append("hide"), lambda: calls.append("quit"))
-    tray.open_action.trigger()
-    tray.hide_action.trigger()
-    tray.quit_action.trigger()
-    assert calls == ["open", "hide", "quit"]
-    assert tray.startup_action.isEnabled() is False
-    assert "showMessage" not in ShellTray.__dict__
-    tray.close()
 
 
 class _MutexBackend:
@@ -603,9 +403,9 @@ def test_expected_startup_failures_return_controlled_status(
     if failure == "controller":
         class _BrokenController:
             def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-                raise RuntimeError("tray initialization failed")
+                raise RuntimeError("desktop construction failed")
 
-        monkeypatch.setattr(desktop_main, "ShellController", _BrokenController)
+        monkeypatch.setattr(desktop_main, "build_desktop", _BrokenController)
 
     def create(_config: Any) -> Any:
         created.append("backend")
@@ -643,7 +443,7 @@ def test_startup_cleanup_attempts_all_resources_after_backend_close_failure(
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             raise RuntimeError("controller failed")
 
-    monkeypatch.setattr(desktop_main, "ShellController", _BrokenController)
+    monkeypatch.setattr(desktop_main, "build_desktop", _BrokenController)
     try:
         with caplog.at_level(logging.ERROR, logger="productivity_app.desktop"):
             assert run_desktop(
@@ -663,40 +463,6 @@ def test_startup_cleanup_attempts_all_resources_after_backend_close_failure(
     assert any(record.exc_info for record in caplog.records if record.message.startswith("Desktop startup failed"))
 
 
-def test_primary_starts_ipc_then_creates_backend_and_releases_ownership_on_quit(
-    qapplication: QApplication, monkeypatch, app_config
-) -> None:
-    from productivity_app.desktop import main as desktop_main
-
-    calls: list[str] = []
-    mutex = _Mutex(primary=True)
-    _Server.instances.clear()
-    monkeypatch.setattr(desktop_main, "ActivationServer", _Server)
-    original_controller = desktop_main.ShellController
-    controllers: list[ShellController] = []
-
-    def capture_controller(*args: Any, **kwargs: Any) -> ShellController:
-        controller = original_controller(*args, **kwargs)
-        controllers.append(controller)
-        return controller
-
-    monkeypatch.setattr(desktop_main, "ShellController", capture_controller)
-    backend = _Backend()
-    result = run_desktop(
-        [],
-        config=app_config,
-        backend_factory=lambda _config: calls.append("backend") or cast(Any, backend),
-        mutex_backend=cast(Any, _MutexBackend(mutex)),
-        sid_provider=lambda: "S-1-5-21-test",
-        qapplication=qapplication,
-        execute=False,
-    )
-    assert controllers[0].request_quit() is QuitResult.SUCCESS
-    assert result == 0
-    assert calls == ["backend"]
-    assert backend.close_count == 1
-    assert _Server.instances[0].closed is True
-    assert mutex.closed is True
 
 
 def test_windows_adapter_is_import_safe_and_non_windows_calls_fail_lazily() -> None:
@@ -706,3 +472,23 @@ def test_windows_adapter_is_import_safe_and_non_windows_calls_fail_lazily() -> N
 
     with pytest.raises(PlatformNotSupportedError):
         WindowsMutexBackend().acquire("opaque")
+
+
+def test_shell_modules_import_without_creating_a_qapplication_or_backend() -> None:
+
+    code = (
+        "import os\n"
+        "os.environ['QT_QPA_PLATFORM'] = 'offscreen'\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "assert QApplication.instance() is None\n"
+        "import productivity_app.desktop.hotkey\n"
+        "import productivity_app.desktop.instance\n"
+        "import productivity_app.desktop.main\n"
+        "import productivity_app.desktop.startup\n"
+        "assert QApplication.instance() is None\n"
+    )
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=root, capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr

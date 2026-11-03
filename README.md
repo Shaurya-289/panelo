@@ -1,37 +1,27 @@
 # Productivity App
 
-A local-first productivity app for Windows: notes, tasks, reminders, timers and focus
-sessions, folders and tags, full-text search, and backup/restore. It runs as a PySide6 (Qt)
-desktop app with a system tray icon, a global hotkey, and single-instance activation.
-All data is stored in a local SQLite database.
+A local-first productivity app for Windows: notes, tasks, repeating reminders, timers and focus
+sessions, a files library, full-text search, trash with a 30-day purge, and automatic
+backup/restore. It is a PySide6 (Qt Quick) desktop app with a system tray icon, a global hotkey
+and single-instance activation. All data is stored in a local SQLite database; files live in a
+plain folder on disk.
 
-## Status: work in progress
+The UI has two modes:
+- **Quick overlay:** opened with a global hotkey (default Ctrl+Alt+Space). Five rearrangeable
+  glass panels (Notes, To-Do, Files, Timers, Reminders) float over a blurred snapshot of the
+  screen.
+- **Full App:** a Keep-style notes grid plus pages for Tasks, Reminders, Focus, Files, Trash and
+  Settings, over a blurred copy of the desktop wallpaper. Double-click an overlay panel header to
+  morph the overlay into the Full App.
+
+## Status
 
 | Part | Status |
 |---|---|
-| Backend (database, services, migrations) | Working, fully tested |
-| Current desktop UI (`src/productivity_app/desktop/ui/`) | Working, being replaced |
-| **New UI** (`prototype/`) | Fully designed Qt Quick prototype, running on **sample data** |
-| Connecting the new UI to the backend | Not started |
-
-### The new UI prototype
-
-The prototype is a Qt Quick (QML) redesign with two modes:
-- **Quick overlay:** opened with a global hotkey. It has five rearrangeable glass panels
-  (Notes, To-Do, Files, Timers, Reminders) over a blurred snapshot of the screen.
-- **Full app:** a Keep-style notes grid plus pages for Tasks, Reminders, Focus, Files, Trash
-  and Settings, over a blurred copy of the desktop wallpaper.
-
-Double-click a panel header to morph the overlay into the full app.
-
-```powershell
-uv run python prototype/main.py              # starts in the tray; press Ctrl+Alt+Space
-uv run python prototype/main.py --reset-tour # show the first-launch tour
-uv run python prototype/main.py --selftest   # automated UI checks
-```
-
-The design specs for each prototype round are in `prototype/PLAN-*.md`.
-The prototype does not touch the real database.
+| Backend (database, services, migrations) | Done, tested |
+| New Qt Quick UI | Done |
+| UI connected to the backend | Done (bridge, scheduler, shell, `--selftest`) |
+| Packaging / installer | Not started |
 
 ## Requirements
 
@@ -49,41 +39,57 @@ uv sync
 ## Run
 
 ```powershell
-# Desktop app
+# The app (a second launch just asks the running one to show itself)
 uv run python -m productivity_app.desktop [--startup] [--show]
+
+# Automated UI checks: opens real windows on screen, runs on a temporary database and library
+uv run python -m productivity_app.desktop --selftest
 
 # Backend only (initializes/migrates the database, then exits)
 uv run python -m productivity_app
 ```
 
-`--startup` is used by the launch-at-login entry and starts hidden unless `--show` is also given.
+`--startup` is what the "Start with Windows" entry runs: it starts hidden in the tray unless
+`--show` is also given. The first launch shows the welcome tour.
 
-Data and logs live in per-user directories chosen by `platformdirs`
-(app name `ProductivityApp`); the database file is `productivity.db`.
+Data and logs live in per-user directories chosen by `platformdirs` (app name
+`ProductivityApp`); the database file is `productivity.db`. The Files library defaults to a
+`Files` folder in the data directory and can be moved in Settings.
 
-## Development
+## Development and testing
 
 ```powershell
-uv run pytest                  # tests with coverage
+uv run pytest                  # all tests, with coverage (Qt runs offscreen)
+uv run pytest tests/ui         # just the UI bridge tests
 uv run ruff check .            # lint
 uv run mypy                    # strict type checking
+$env:QT_FORCE_STDERR_LOGGING = "1"; uv run python -m productivity_app.desktop --selftest
 ```
 
-Desktop tests run Qt offscreen. Some of them start real processes and use the real Windows
-mutex, registry, and local IPC, so they can be sensitive to the environment.
+Tests use temporary databases and never touch the real data directory, registry Run key or
+Recycle Bin. `--selftest` takes a few minutes and should finish with every check passing and no
+QML warnings on stderr.
 
 ## Layout (`src/productivity_app/`)
 
 | Package | Role |
 |---|---|
-| `core/` | Clock, config, event bus, exceptions, ids, lifecycle, logging, paths |
+| `core/` | Clock, config, event bus, exceptions, ids, lifecycle, logging, paths, recurrence rules |
 | `db/` | Engine/session, unit of work, ORM models, Alembic migrations |
 | `repositories/` | Data access per feature |
 | `schemas/` | Pydantic input/output types |
 | `services/` | Business logic and validation |
 | `bootstrap.py` | Composition root; safe runtime replacement (e.g. after restore) |
-| `desktop/` | Qt shell: controller, tray, hotkey, activation IPC, window, `ui/` panels |
+| `files/` | Files library on disk (path guard, name clashes, moves), no database |
+| `ui/` | The Qt Quick UI: `qml/` (App module), `fonts/`, `bridge/` (Python `Backend`, scheduler, library adapter, system helpers), `selftest/` |
+| `desktop/` | Process shell: entry point, overlay/Full App controller, tray, hotkey, single-instance IPC, startup registration |
 | `windows/` | Windows adapters: mutex, hotkeys, startup registry, window presentation |
+
+## Design specs
+
+The design decisions for each UI round are in [`docs/design/`](docs/design/). The plan for
+turning the prototype into this app is [`docs/PLAN-real-app.md`](docs/PLAN-real-app.md). The
+original prototype remains in git history (commit `acdedab`).
 
 ## Migrations
 

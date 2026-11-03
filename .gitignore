@@ -13,7 +13,6 @@ __pycache__/
 *.db-shm
 *.db-wal
 *.log
-prototype/.shots/
 .shots/
 .scratch/
 .coverage

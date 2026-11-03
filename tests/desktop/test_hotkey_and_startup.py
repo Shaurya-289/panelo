@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ctypes
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,11 +8,9 @@ from typing import Any
 import pytest
 
 from productivity_app.core.exceptions import (
-    ApplicationLifecycleError,
     HotkeyRegistrationError,
     StaleVersionError,
 )
-from productivity_app.desktop.controller import QuitResult, ShellController
 from productivity_app.desktop.errors import StartupRegistrationError
 from productivity_app.desktop.hotkey import (
     MOD_ALT,
@@ -28,12 +25,8 @@ from productivity_app.desktop.startup import (
     StartupCoordinator,
     StartupState,
     build_startup_command,
-    default_launcher,
     quote_windows_argument,
 )
-from productivity_app.desktop.tray import ShellTray
-from productivity_app.schemas.backups import RestoreBackup
-from productivity_app.schemas.settings import SettingsPatch
 from productivity_app.windows.startup import REG_SZ, RegistryValue, WindowsStartupRegistry
 
 
@@ -113,6 +106,14 @@ class _SelectiveHotkeyBackend(_HotkeyBackend):
         super().unregister(hwnd, hotkey_id)
 
 
+
+
+
+
+
+
+
+
 class _QApplication:
     def __init__(self) -> None:
         self.filters: list[object] = []
@@ -157,27 +158,6 @@ class _Window:
         self.hidden = True
 
 
-class _Tray:
-    available = True
-
-    def __init__(self) -> None:
-        self.states: list[tuple[bool, bool]] = []
-
-    def show(self) -> None:
-        return None
-
-    def close(self) -> None:
-        return None
-
-    def set_startup_state(self, *, enabled: bool, checked: bool) -> None:
-        self.states.append((enabled, checked))
-
-
-class _Mutex:
-    primary = True
-
-    def close(self) -> None:
-        return None
 
 
 class _Registry:
@@ -508,93 +488,12 @@ def test_same_hotkey_checks_version_without_os_reregistration() -> None:
     assert len(backend.registered) == 1
 
 
-def test_native_filter_routes_hidden_and_minimized_window(qapplication: Any) -> None:
-    backend, window = _HotkeyBackend(), _Window()
-    manager = HotkeyManager(qapplication, window, backend, lambda: None)
-    controller = ShellController(
-        _Application(_SettingsService()), qapplication, _Mutex(), window=window, tray=_Tray()
-    )
-    manager = HotkeyManager(qapplication, window, backend, controller.show_window)
-    manager.start("Ctrl+Alt+Space")
-    assert manager._filter is not None
-    assert _route_hotkey(manager._filter, 0x5041) is True
-    assert window.show_count == 1 and window.activate_count == 1
-    window.minimized = True
-    assert _route_hotkey(manager._filter, 0x5041) is True
-    assert window.normal_count == 1
-    manager.close()
 
 
-def test_controller_initial_hotkey_failures_are_nonfatal_and_shutdown_rejection_keeps_binding(qapplication: Any) -> None:
-    settings = _SettingsService()
-    backend, window = _HotkeyBackend(), _Window()
-    manager = HotkeyManager(qapplication, window, backend, lambda: None)
-    controller = ShellController(
-        _Application(settings, close_error=RuntimeError("busy")),
-        qapplication,
-        _Mutex(),
-        window=window,
-        tray=_Tray(),
-        hotkey_manager=manager,
-    )
-    controller.start(start_hidden=False)
-    assert backend.registered
-    assert controller.request_quit() is QuitResult.REJECTED
-    assert backend.registered and manager._filter is not None
-
-    invalid = _SettingsService(_Settings(global_hotkey="bad"))
-    invalid_controller = ShellController(
-        _Application(invalid), qapplication, _Mutex(), window=_Window(), tray=_Tray(),
-        hotkey_manager=HotkeyManager(qapplication, _Window(), _HotkeyBackend(), lambda: None),
-    )
-    invalid_controller.start(start_hidden=False)
-    assert invalid.settings.global_hotkey == "bad"
-    assert "inactive" in invalid_controller.status_text
-
-    conflict = _SettingsService()
-    conflict_controller = ShellController(
-        _Application(conflict), qapplication, _Mutex(), window=_Window(), tray=_Tray(),
-        hotkey_manager=HotkeyManager(
-            qapplication, _Window(), _HotkeyBackend(register_error=HotkeyRegistrationError("busy")), lambda: None
-        ),
-    )
-    conflict_controller.start(start_hidden=False)
-    assert conflict.settings.global_hotkey == "Ctrl+Alt+Space"
-    assert "inactive" in conflict_controller.status_text
 
 
-def test_runtime_swap_uses_current_settings_service_without_reregistering(qapplication: Any) -> None:
-    first, second = _SettingsService(), _SettingsService()
-    application, backend, window = _Application(first), _HotkeyBackend(), _Window()
-    manager = HotkeyManager(qapplication, window, backend, lambda: None)
-    controller = ShellController(
-        application, qapplication, _Mutex(), window=window, tray=_Tray(), hotkey_manager=manager
-    )
-    controller.start(start_hidden=False)
-    registered_before = dict(backend.registered)
-    application.settings = second
-    controller.change_hotkey("Ctrl+Shift+F1", 1)
-    assert first.settings.global_hotkey == "Ctrl+Alt+Space"
-    assert second.settings.global_hotkey == "Ctrl+Shift+F1"
-    assert backend.registered != registered_before
 
 
-def test_tray_reflects_startup_state_and_drift_without_mutation(tmp_path: Path, qapplication: Any) -> None:
-    settings, registry = _SettingsService(_Settings(start_with_windows=True)), _Registry()
-    coordinator = StartupCoordinator(_Application(settings), registry, _launcher(tmp_path))
-    tray, window = _Tray(), _Window()
-    controller = ShellController(
-        _Application(settings), qapplication, _Mutex(), window=window, tray=tray,
-        startup_coordinator=coordinator,
-    )
-    controller.start(start_hidden=False)
-    assert tray.states[-1] == (True, False)
-    registry.value = RegistryValue(b"drift", 3)
-    controller._initialize_platform_integrations()
-    assert tray.states[-1] == (True, False)
-    controller._tray_startup_toggle()
-    assert registry.value == RegistryValue(b"drift", 3)
-    assert settings.settings.start_with_windows is True
 
 
 def test_disable_settings_failure_restores_exact_raw_registry_value(tmp_path: Path) -> None:
@@ -607,137 +506,12 @@ def test_disable_settings_failure_restores_exact_raw_registry_value(tmp_path: Pa
     assert registry.value == previous
 
 
-def test_actual_application_runtime_swap_preserves_process_hotkey_and_routes_once(
-    application: Any, qapplication: Any,
-) -> None:
-    """A Phase 5 runtime replacement must not disturb shell-owned Win32 state."""
-    backend, window = _HotkeyBackend(), _Window()
-    controller = ShellController(
-        application, qapplication, _Mutex(), window=window, tray=_Tray()
-    )
-    manager = HotkeyManager(qapplication, window, backend, controller.show_window)
-    controller.attach_platform_integrations(manager, None)
-    controller.start(start_hidden=False)
-    active_id, native_filter = manager._active_id, manager._filter
-    assert active_id is not None and native_filter is not None
-    backup = application.backups.create_backup()
-    old_runtime, old_settings = application._active_runtime(), application.settings
-    registrations, unregistrations = list(backend.register_calls), list(backend.unregister_calls)
-
-    application.restore_backup(
-        RestoreBackup(source_path=application.backups.backup_directory / backup.filename)
-    )
-
-    assert application._active_runtime() is not old_runtime
-    assert application.settings is not old_settings
-    assert manager._active_id == active_id
-    assert manager._filter is native_filter
-    assert active_id in backend.registered
-    assert backend.register_calls == registrations
-    assert backend.unregister_calls == unregistrations
-    with pytest.raises(ApplicationLifecycleError):
-        old_settings.get_settings()
-
-    before = (window.show_count, window.raise_count, window.activate_count)
-    assert _route_hotkey(native_filter, active_id) is True
-    assert (window.show_count, window.raise_count, window.activate_count) == (
-        before[0], before[1] + 1, before[2] + 1
-    )
-    assert window.hidden is False and window.minimized is False
-    assert _route_hotkey(native_filter, 0x5042 if active_id == 0x5041 else 0x5041) is False
-    assert (window.raise_count, window.activate_count) == (before[1] + 1, before[2] + 1)
-
-    version = application.settings.get_settings().version
-    controller.change_hotkey("Ctrl+Shift+F1", version)
-    assert application.settings.get_settings().global_hotkey == "Ctrl+Shift+F1"
-    assert manager._active_id is not None and manager._active_id != active_id
-    after_change = (window.raise_count, window.activate_count)
-    assert _route_hotkey(native_filter, active_id) is False
-    assert _route_hotkey(native_filter, manager._active_id) is True
-    assert (window.raise_count, window.activate_count) == (after_change[0] + 1, after_change[1] + 1)
-    manager.close()
 
 
-def test_startup_runtime_swap_only_inspects_external_drift(
-    application: Any, tmp_path: Path, qapplication: Any
-) -> None:
-    registry = _Registry()
-    coordinator = StartupCoordinator(application, registry, _launcher(tmp_path))
-    original = application.settings.get_settings()
-    configured = application.settings.update_settings(
-        SettingsPatch(expected_version=original.version, start_with_windows=True)
-    )
-    expected = coordinator.inspect().expected_command
-    assert expected is not None
-    registry.value = RegistryValue(expected, REG_SZ)
-    backup = application.backups.create_backup()
-    application.settings.update_settings(
-        SettingsPatch(expected_version=configured.version, start_with_windows=False)
-    )
-    registry.value = RegistryValue('"external.exe" --startup', REG_SZ)
-    sibling = registry.siblings["UnrelatedApp"]
-    old_runtime, old_settings = application._active_runtime(), application.settings
-    shell = ShellController(
-        application, qapplication, _Mutex(), window=_Window(), tray=_Tray(),
-        startup_coordinator=coordinator,
-    )
-
-    application.restore_backup(
-        RestoreBackup(source_path=application.backups.backup_directory / backup.filename)
-    )
-    writes, deletes = registry.write_count, registry.delete_count
-    shell._initialize_platform_integrations()
-
-    assert application._active_runtime() is not old_runtime
-    assert application.settings is not old_settings
-    assert application.settings.get_settings().start_with_windows is True
-    with pytest.raises(ApplicationLifecycleError):
-        old_settings.get_settings()
-    assert coordinator.inspect().state is StartupState.MISMATCHED
-    assert registry.value == RegistryValue('"external.exe" --startup', REG_SZ)
-    assert registry.siblings["UnrelatedApp"] == sibling
-    assert (registry.write_count, registry.delete_count) == (writes, deletes)
-    assert shell.tray.states[-1] == (True, False)
 
 
-def test_native_filter_routes_visible_background_window_exactly_once(qapplication: Any) -> None:
-    backend, window = _HotkeyBackend(), _Window()
-    window.hidden = window.minimized = False
-    controller = ShellController(
-        _Application(_SettingsService()), qapplication, _Mutex(), window=window, tray=_Tray()
-    )
-    manager = HotkeyManager(qapplication, window, backend, controller.show_window)
-    manager.start("Ctrl+Alt+Space")
-    assert manager._filter is not None
-    before = (window.show_count, window.raise_count, window.activate_count)
-    assert _route_hotkey(manager._filter, 0x5041) is True
-    assert (window.show_count, window.raise_count, window.activate_count) == (
-        before[0], before[1] + 1, before[2] + 1
-    )
-    assert window.hidden is False and window.minimized is False
-    manager.close()
 
 
-def test_development_launcher_is_unavailable_without_registry_or_settings_mutation(
-    monkeypatch: pytest.MonkeyPatch, qapplication: Any
-) -> None:
-    monkeypatch.setattr(sys, "frozen", False, raising=False)
-    assert default_launcher() is None
-    registry, service = _Registry(), _SettingsService()
-    coordinator = StartupCoordinator(_Application(service), registry, None)
-    tray = ShellTray(lambda: None, lambda: None, lambda: None)
-    controller = ShellController(
-        _Application(service), qapplication, _Mutex(), window=_Window(), tray=tray,
-        startup_coordinator=coordinator,
-    )
-    controller.start(start_hidden=False)
-    assert coordinator.inspect().state is StartupState.UNAVAILABLE
-    assert tray.startup_action.isEnabled() is False
-    assert tray.startup_action.isChecked() is False
-    tray.startup_action.trigger()
-    assert registry.value is None and registry.write_count == registry.delete_count == 0
-    assert service.settings.start_with_windows is False
-    controller.abort_startup()
 
 
 def test_reg_dword_startup_value_is_mismatched_and_preserved(tmp_path: Path) -> None:
@@ -816,42 +590,5 @@ def test_disable_matrix_covers_absent_mismatches_repair_and_compensation_failure
     assert error.operation == "disable" and error.drift_state == StartupState.DISABLED.value
 
 
-def test_repair_is_explicit_and_never_changes_unrelated_run_values(tmp_path: Path, qapplication: Any) -> None:
-    raw = RegistryValue(b"foreign", 3)
-    registry, service = _Registry(raw), _SettingsService()
-    sibling = registry.siblings["UnrelatedApp"]
-    coordinator = StartupCoordinator(_Application(service), registry, _launcher(tmp_path))
-    coordinator.inspect()
-    controller = ShellController(
-        _Application(service), qapplication, _Mutex(), window=_Window(), tray=_Tray(),
-        startup_coordinator=coordinator,
-    )
-    controller.start(start_hidden=False)
-    controller._initialize_platform_integrations()
-    assert registry.value == raw and registry.siblings["UnrelatedApp"] == sibling
-    assert registry.write_count == registry.delete_count == 0
-    with pytest.raises(StartupRegistrationError):
-        coordinator.set_enabled(True, 1)
-    assert registry.value == raw and registry.siblings["UnrelatedApp"] == sibling
-    assert coordinator.set_enabled(True, 1, repair=True).state is StartupState.ENABLED
-    assert registry.siblings["UnrelatedApp"] == sibling
 
 
-def test_tray_enabled_refresh_is_inspection_only(tmp_path: Path, qapplication: Any) -> None:
-    registry, service = _Registry(), _SettingsService(_Settings(start_with_windows=True))
-    coordinator = StartupCoordinator(_Application(service), registry, _launcher(tmp_path))
-    expected = coordinator.inspect().expected_command
-    assert expected is not None
-    registry.value = RegistryValue(expected, REG_SZ)
-    tray = ShellTray(lambda: None, lambda: None, lambda: None)
-    controller = ShellController(
-        _Application(service), qapplication, _Mutex(), window=_Window(), tray=tray,
-        startup_coordinator=coordinator,
-    )
-    writes, deletes = registry.write_count, registry.delete_count
-    controller.start(start_hidden=False)
-    controller._initialize_platform_integrations()
-    assert tray.startup_action.isEnabled() is True
-    assert tray.startup_action.isChecked() is True
-    assert (registry.write_count, registry.delete_count) == (writes, deletes)
-    controller.abort_startup()

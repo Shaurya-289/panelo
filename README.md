@@ -48,17 +48,48 @@ The UI has two modes:
 - [uv](https://docs.astral.sh/uv/)
 - SQLite built with FTS5 (checked at startup)
 
-## Setup
+## Getting started
 
-```powershell
-uv sync
-```
+1. **Install [uv](https://docs.astral.sh/uv/)** (it also installs the right Python for you).
+   In PowerShell:
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+   Then close and reopen PowerShell.
+2. **Download the code:**
+   ```powershell
+   git clone https://github.com/Shaurya-289/productivity-app.git
+   cd productivity-app
+   ```
+3. **Install the dependencies:**
+   ```powershell
+   uv sync
+   ```
+4. **Start the app:**
+   ```powershell
+   uv run python -m productivity_app.desktop
+   ```
 
-## Run
+### Using it
+
+- The first launch opens the Full App with a short welcome tour (it asks your name).
+- The app keeps running in the **system tray** (bottom-right of the taskbar) when you close the
+  window. Right-click the tray icon for *Open overlay*, *Open full app* and *Quit*.
+- Press **Ctrl+Alt+Space** anywhere to open the quick overlay; press it again or Esc to close it.
+  You can change the hotkey in Settings.
+- **Double-click a panel header** in the overlay (or press the hotkey twice quickly) to expand it
+  into the Full App.
+- Everything is stored locally on your computer; nothing is sent anywhere.
+- Turn on **Start with Windows** in Settings to have it waiting in the tray after you sign in.
+
+## Run options
 
 ```powershell
 # The app (a second launch just asks the running one to show itself)
-uv run python -m productivity_app.desktop [--startup] [--show]
+uv run python -m productivity_app.desktop
+
+# Start hidden in the tray (what "Start with Windows" uses); add --show to also open the window
+uv run python -m productivity_app.desktop --startup
 
 # Automated UI checks: opens real windows on screen, runs on a temporary database and library
 uv run python -m productivity_app.desktop --selftest

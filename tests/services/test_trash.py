@@ -7,12 +7,12 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import text
 
-from productivity_app.core.exceptions import NotFoundError
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.reminders import CreateReminder
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.schemas.timers import CreateTimer
-from productivity_app.services.trash import TRASH_RETENTION_DAYS
+from panelo.core.exceptions import NotFoundError
+from panelo.schemas.notes import CreateNote
+from panelo.schemas.reminders import CreateReminder
+from panelo.schemas.tasks import CreateTask
+from panelo.schemas.timers import CreateTimer
+from panelo.services.trash import TRASH_RETENTION_DAYS
 
 
 def _trashed_note(application, title: str = "Note", content: str = "", clock=None, **extra):
@@ -212,7 +212,7 @@ def test_purging_publishes_events_only_after_the_commit(application, clock) -> N
 
 
 def test_a_failed_purge_changes_nothing(application, clock, monkeypatch: pytest.MonkeyPatch) -> None:
-    from productivity_app.repositories.tasks import TaskRepository
+    from panelo.repositories.tasks import TaskRepository
 
     note = _trashed_note(application, "Note")
     task = _trashed_task(application, "Task")

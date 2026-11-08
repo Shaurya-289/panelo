@@ -11,11 +11,11 @@ user's sketch. Its panels: Notes (tall, left), To-Do + Files (middle), Timers + 
 Double-clicking a panel header **morphs** the overlay into the Full App on that section.
 
 Everything stays inside `prototype/`. **Do not modify anything under `src/` or `tests/`.**
-You may *import* from `src/productivity_app` (the launcher already adds `src` to `sys.path`).
+You may *import* from `src/panelo` (the launcher already adds `src` to `sys.path`).
 
 ## Existing prototype (read these first)
 - `prototype/main.py`: launcher. Loads the Outfit font, loads `qml/Main.qml`, applies DWM dark mode,
-  rounded corners and Acrylic (`productivity_app.windows.presentation.apply_backdrop`), sets
+  rounded corners and Acrylic (`panelo.windows.presentation.apply_backdrop`), sets
   `Theme.acrylic`. It has `--screenshot PATH`, `--state editor|drawer|compose` and `--delay MS`.
   Screenshots call `window.saveShot(path)` (QML `contentItem.grabToImage`), then the app quits.
 - `prototype/qml/Main.qml`: the Full App window (frameless, custom title bar, resize edges,
@@ -188,8 +188,8 @@ auto-dismisses after 8 s, and pauses while hovered. The **fallback** is a Window
 
 **Global hotkey:** reuse the existing code. Do not write new WinAPI hotkey code.
 ```python
-from productivity_app.desktop.hotkey import HotkeyManager
-from productivity_app.windows.hotkeys import WindowsHotkeyBackend
+from panelo.desktop.hotkey import HotkeyManager
+from panelo.windows.hotkeys import WindowsHotkeyBackend
 manager = HotkeyManager(app, overlay_window, WindowsHotkeyBackend(), controller.on_hotkey)
 manager.start("Ctrl+Alt+Space")   # needs >=2 modifiers + A-Z/0-9/Space/F1-F11
 ```

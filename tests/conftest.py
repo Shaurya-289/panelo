@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from productivity_app.bootstrap import create_application
-from productivity_app.core.clock import Clock
-from productivity_app.core.config import AppConfig, DatabaseConfig
-from productivity_app.core.paths import AppPaths
+from panelo.bootstrap import create_application
+from panelo.core.clock import Clock
+from panelo.core.config import AppConfig, DatabaseConfig
+from panelo.core.paths import AppPaths
 
 
 class FakeClock(Clock):

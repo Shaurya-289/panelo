@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from productivity_app.core.events import DomainEventType
-from productivity_app.schemas.backups import RestoreBackup
-from productivity_app.schemas.tasks import CreateTask
+from panelo.core.events import DomainEventType
+from panelo.schemas.backups import RestoreBackup
+from panelo.schemas.tasks import CreateTask
 
 
 def test_runtime_event_subscriptions_are_isolated_across_real_restore(application: Any) -> None:

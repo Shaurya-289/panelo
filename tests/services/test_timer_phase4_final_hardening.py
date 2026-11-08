@@ -4,8 +4,8 @@ from datetime import timedelta
 
 import pytest
 
-from productivity_app.core.exceptions import InvalidStateTransitionError, StaleVersionError
-from productivity_app.schemas.timers import CreateTimer, TimerRunQuery, UpdateTimer
+from panelo.core.exceptions import InvalidStateTransitionError, StaleVersionError
+from panelo.schemas.timers import CreateTimer, TimerRunQuery, UpdateTimer
 
 
 def _watch(application):
@@ -87,7 +87,7 @@ def test_paused_timer_does_not_advance_after_application_recreation(
     paused = application.timers.pause_timer(timer.id, started.version)
     application.close()
     clock.now += timedelta(days=1)
-    from productivity_app.bootstrap import create_application
+    from panelo.bootstrap import create_application
 
     restarted = create_application(app_config, clock)
     try:

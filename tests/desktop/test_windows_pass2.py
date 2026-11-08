@@ -7,15 +7,15 @@ from uuid import uuid4
 
 import pytest
 
-from productivity_app.core.exceptions import HotkeyRegistrationError
-from productivity_app.desktop.errors import StartupRegistrationError
-from productivity_app.windows.hotkeys import (
+from panelo.core.exceptions import HotkeyRegistrationError
+from panelo.desktop.errors import StartupRegistrationError
+from panelo.windows.hotkeys import (
     MOD_ALT,
     MOD_CONTROL,
     MOD_NOREPEAT,
     WindowsHotkeyBackend,
 )
-from productivity_app.windows.startup import REG_SZ, WindowsStartupRegistry
+from panelo.windows.startup import REG_SZ, WindowsStartupRegistry
 
 
 def test_windows_hotkey_register_unregister_and_reregister() -> None:
@@ -36,7 +36,7 @@ def test_windows_hotkey_register_unregister_and_reregister() -> None:
 
 
 def test_windows_registry_adapter_uses_an_isolated_value() -> None:
-    registry = WindowsStartupRegistry(value_name=f"ProductivityApp-Pass2-Test-{uuid4().hex}")
+    registry = WindowsStartupRegistry(value_name=f"Panelo-Pass2-Test-{uuid4().hex}")
     try:
         assert registry.inspect() is None
         try:

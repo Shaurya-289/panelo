@@ -4,16 +4,16 @@ from datetime import timedelta
 
 import pytest
 
-from productivity_app.bootstrap import create_application
-from productivity_app.core.exceptions import ConflictError, InvalidStateTransitionError
-from productivity_app.schemas.focus import (
+from panelo.bootstrap import create_application
+from panelo.core.exceptions import ConflictError, InvalidStateTransitionError
+from panelo.schemas.focus import (
     AdvanceFocusSequence,
     CancelFocusSequence,
     CreateFocusSequence,
     CreateFocusSession,
     FocusStatsQuery,
 )
-from productivity_app.schemas.tasks import CreateTask
+from panelo.schemas.tasks import CreateTask
 
 
 def test_standalone_focus_session_creates_ready_timer(application) -> None:

@@ -7,19 +7,19 @@ from threading import Barrier
 import pytest
 from sqlalchemy import text
 
-from productivity_app.core.exceptions import DatabaseError
-from productivity_app.db.fts_contract import (
+from panelo.core.exceptions import DatabaseError
+from panelo.db.fts_contract import (
     DOCUMENT_FTS_TRIGGER_SQL,
     EXPECTED_NORMALIZED_FTS_TRIGGER_SQL,
     normalize_fts_sql,
 )
-from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
-from productivity_app.repositories.search import SearchRepository
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.reminders import CreateReminder
-from productivity_app.schemas.search import FullTextSearchQuery
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.schemas.timers import CreateTimer, CreateTimerPreset, UpdateTimer
+from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
+from panelo.repositories.search import SearchRepository
+from panelo.schemas.notes import CreateNote
+from panelo.schemas.reminders import CreateReminder
+from panelo.schemas.search import FullTextSearchQuery
+from panelo.schemas.tasks import CreateTask
+from panelo.schemas.timers import CreateTimer, CreateTimerPreset, UpdateTimer
 
 
 def _fts_ids(path, expression: str) -> list[str]:

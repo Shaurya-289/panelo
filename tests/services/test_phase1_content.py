@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from productivity_app.core.exceptions import NotFoundError, StaleVersionError
-from productivity_app.schemas.notes import CreateNote, NoteQuery, NoteSearchQuery, UpdateNote
+from panelo.core.exceptions import NotFoundError, StaleVersionError
+from panelo.schemas.notes import CreateNote, NoteQuery, NoteSearchQuery, UpdateNote
 
 
 def test_two_readers_cannot_overwrite_a_note(application) -> None:

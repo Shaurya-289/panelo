@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from productivity_app.schemas.focus import (
+from panelo.schemas.focus import (
     AdvanceFocusSequence,
     CreateFocusSequence,
     CreateFocusSession,
 )
-from productivity_app.schemas.timers import CreateTimer
+from panelo.schemas.timers import CreateTimer
 
 
 def _timer(application, name: str, ms: int = 60_000):

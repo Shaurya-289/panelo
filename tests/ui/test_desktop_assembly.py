@@ -14,30 +14,30 @@ import pytest
 from PySide6.QtCore import QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.bootstrap import Application
-from productivity_app.core.config import AppConfig
-from productivity_app.desktop.app import (
+from panelo.bootstrap import Application
+from panelo.core.config import AppConfig
+from panelo.desktop.app import (
     DesktopApp,
     build_desktop,
     reconcile_startup,
     startup_handler,
 )
-from productivity_app.desktop.main import (
+from panelo.desktop.main import (
     DesktopOptions,
     parse_desktop_options,
     run_desktop,
     show_initial,
 )
-from productivity_app.desktop.startup import StartupCoordinator, default_launcher
-from productivity_app.files.library import FileLibrary
-from productivity_app.ui.bridge.backend import Backend
-from productivity_app.ui.selftest.harness import FakeHotkeyBackend, FakeStartupRegistry, hard_delete
+from panelo.desktop.startup import StartupCoordinator, default_launcher
+from panelo.files.library import FileLibrary
+from panelo.ui.bridge.backend import Backend
+from panelo.ui.selftest.harness import FakeHotkeyBackend, FakeStartupRegistry, hard_delete
 from tests.conftest import FakeClock
 
 
 @pytest.fixture
 def launcher(tmp_path: Path) -> Path:
-    path = tmp_path / "launcher" / "productivity-app.exe"
+    path = tmp_path / "launcher" / "panelo.exe"
     path.parent.mkdir()
     path.write_bytes(b"")
     return path
@@ -170,7 +170,7 @@ def test_a_missing_run_entry_is_repaired_at_start(
 
 def test_default_launcher_is_none_without_an_installed_script() -> None:
     launcher = default_launcher()
-    assert launcher is None or launcher.name == "productivity-app.exe"
+    assert launcher is None or launcher.name == "panelo.exe"
 
 
 # -- The process ----------------------------------------------------------------------------

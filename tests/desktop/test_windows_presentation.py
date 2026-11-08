@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from productivity_app.windows import presentation
+from panelo.windows import presentation
 
 
 class Native:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from productivity_app.bootstrap import create_application
-from productivity_app.schemas.reminders import CreateReminder
+from panelo.bootstrap import create_application
+from panelo.schemas.reminders import CreateReminder
 from tests.conftest import FakeClock
 
 

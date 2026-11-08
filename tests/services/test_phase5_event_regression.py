@@ -7,15 +7,15 @@ from datetime import timedelta
 
 import pytest
 
-import productivity_app.db.unit_of_work as uow_module
-from productivity_app.core.events import DomainEvent, DomainEventType
-from productivity_app.core.exceptions import ApplicationLifecycleError
-from productivity_app.schemas.backups import RestoreBackup
-from productivity_app.schemas.notes import CreateNote, UpdateNote
-from productivity_app.schemas.reminders import CreateReminder, ReminderPageQuery, UpdateReminder
-from productivity_app.schemas.settings import SettingsPatch, Theme
-from productivity_app.schemas.tasks import CreateTask, UpdateTask
-from productivity_app.schemas.timers import (
+import panelo.db.unit_of_work as uow_module
+from panelo.core.events import DomainEvent, DomainEventType
+from panelo.core.exceptions import ApplicationLifecycleError
+from panelo.schemas.backups import RestoreBackup
+from panelo.schemas.notes import CreateNote, UpdateNote
+from panelo.schemas.reminders import CreateReminder, ReminderPageQuery, UpdateReminder
+from panelo.schemas.settings import SettingsPatch, Theme
+from panelo.schemas.tasks import CreateTask, UpdateTask
+from panelo.schemas.timers import (
     CreateTimer,
     CreateTimerPreset,
     UpdateTimer,

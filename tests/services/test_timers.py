@@ -4,8 +4,8 @@ from datetime import timedelta
 
 import pytest
 
-from productivity_app.core.exceptions import InvalidStateTransitionError
-from productivity_app.schemas.timers import CreateTimer
+from panelo.core.exceptions import InvalidStateTransitionError
+from panelo.schemas.timers import CreateTimer
 
 
 def test_timer_lifecycle_uses_anchor_elapsed_time(application, clock) -> None:

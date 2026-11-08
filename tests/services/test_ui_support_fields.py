@@ -5,11 +5,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from productivity_app.bootstrap import Application
-from productivity_app.schemas.focus import CreateFocusSequence, CreateFocusSession
-from productivity_app.schemas.reminders import CreateReminder
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.schemas.timers import CreateTimer, TimerQuery
+from panelo.bootstrap import Application
+from panelo.schemas.focus import CreateFocusSequence, CreateFocusSession
+from panelo.schemas.reminders import CreateReminder
+from panelo.schemas.tasks import CreateTask
+from panelo.schemas.timers import CreateTimer, TimerQuery
 from tests.conftest import FakeClock
 
 

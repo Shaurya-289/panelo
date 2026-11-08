@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from productivity_app.schemas.timers import CreateTimer, TimerQuery
+from panelo.schemas.timers import CreateTimer, TimerQuery
 
 
 def test_timer_listing_is_deterministic(application) -> None:

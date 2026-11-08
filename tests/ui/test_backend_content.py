@@ -7,9 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.bootstrap import Application
-from productivity_app.schemas.notes import CreateNote, UpdateNote
-from productivity_app.ui.bridge.backend import Backend
+from panelo.bootstrap import Application
+from panelo.schemas.notes import CreateNote, UpdateNote
+from panelo.ui.bridge.backend import Backend
 from tests.conftest import FakeClock
 from tests.ui.conftest import listing, ms
 

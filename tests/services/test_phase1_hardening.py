@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from productivity_app.core.events import InProcessEventBus
-from productivity_app.core.exceptions import ValidationError
-from productivity_app.db.unit_of_work import create_unit_of_work_factory
-from productivity_app.schemas.notes import CreateNote, NoteQuery, NoteSearchQuery
-from productivity_app.services.notes import NoteService
+from panelo.core.events import InProcessEventBus
+from panelo.core.exceptions import ValidationError
+from panelo.db.unit_of_work import create_unit_of_work_factory
+from panelo.schemas.notes import CreateNote, NoteQuery, NoteSearchQuery
+from panelo.services.notes import NoteService
 
 
 def test_note_filters_paging_sorting_and_literal_search(application) -> None:

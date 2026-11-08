@@ -11,27 +11,27 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.core.events import DomainEvent
-from productivity_app.core.exceptions import (
+from panelo.core.events import DomainEvent
+from panelo.core.exceptions import (
     ConflictError,
     InvalidStateTransitionError,
     NotFoundError,
     StaleVersionError,
     ValidationError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
-from productivity_app.repositories.reminders import ReminderRepository
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.reminders import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
+from panelo.repositories.reminders import ReminderRepository
+from panelo.schemas.notes import CreateNote
+from panelo.schemas.reminders import (
     CreateReminder,
     ReminderPageQuery,
     ReminderQuery,
     SnoozeReminder,
     UpdateReminder,
 )
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.services.reminders import _translate_reminder_integrity_error
+from panelo.schemas.tasks import CreateTask
+from panelo.services.reminders import _translate_reminder_integrity_error
 
 
 def _bus(application):

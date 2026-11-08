@@ -7,10 +7,10 @@ from alembic import command
 from sqlalchemy import Connection, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from productivity_app.bootstrap import _alembic_config, create_application
-from productivity_app.core.config import AppConfig, DatabaseConfig
-from productivity_app.core.paths import AppPaths
-from productivity_app.db.engine import sqlite_url
+from panelo.bootstrap import _alembic_config, create_application
+from panelo.core.config import AppConfig, DatabaseConfig
+from panelo.core.paths import AppPaths
+from panelo.db.engine import sqlite_url
 
 BASE = "20260924_0001"
 HEAD = "20261002_0002"

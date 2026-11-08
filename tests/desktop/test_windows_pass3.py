@@ -11,14 +11,14 @@ from uuid import uuid4
 
 import pytest
 
-from productivity_app.desktop.errors import StartupRegistrationError
-from productivity_app.desktop.instance import (
+from panelo.desktop.errors import StartupRegistrationError
+from panelo.desktop.instance import (
     ActivationResponse,
     ActivationServer,
     activation_server_name,
 )
-from productivity_app.windows.mutex import WindowsMutexBackend, build_instance_identity
-from productivity_app.windows.startup import RegistryValue, WindowsStartupRegistry
+from panelo.windows.mutex import WindowsMutexBackend, build_instance_identity
+from panelo.windows.startup import RegistryValue, WindowsStartupRegistry
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="requires Windows shell APIs")
 
@@ -235,7 +235,7 @@ def test_cross_process_hotkey_collision_is_typed_and_releases_after_owner_exit()
 
 
 def test_isolated_real_registry_preserves_exact_raw_value_and_type() -> None:
-    registry = WindowsStartupRegistry(value_name=f"ProductivityApp-Pass3-Test-{uuid4().hex}")
+    registry = WindowsStartupRegistry(value_name=f"Panelo-Pass3-Test-{uuid4().hex}")
     original = None
     try:
         try:

@@ -14,15 +14,15 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtNetwork import QLocalSocket
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.desktop.errors import PlatformNotSupportedError, SingleInstanceError
-from productivity_app.desktop.instance import (
+from panelo.desktop.errors import PlatformNotSupportedError, SingleInstanceError
+from panelo.desktop.instance import (
     ActivationResponse,
     ActivationServer,
     activation_server_name,
     parse_activation_request,
 )
-from productivity_app.desktop.main import DesktopOptions, parse_desktop_options, run_desktop
-from productivity_app.windows.mutex import build_instance_identity
+from panelo.desktop.main import DesktopOptions, parse_desktop_options, run_desktop
+from panelo.windows.mutex import build_instance_identity
 
 
 @dataclass
@@ -118,7 +118,7 @@ def test_real_local_activation_ipc_routes_one_request(qapplication: QApplication
     code = (
         "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'; "
         "from PySide6.QtWidgets import QApplication; app = QApplication([]); "
-        "from productivity_app.desktop.instance import request_activation; "
+        "from panelo.desktop.instance import request_activation; "
         f"request_activation({server.server_name!r}, startup_timeout_ms=1_000, attempt_timeout_ms=500)"
     )
     child = subprocess.Popen([sys.executable, "-c", code], env=os.environ.copy())
@@ -222,7 +222,7 @@ def test_activation_client_retries_busy_primary_until_ready(qapplication: QAppli
     server = ActivationServer(f"phase6-ready-{uuid4().hex}", activate)
     server.start()
     try:
-        from productivity_app.desktop.instance import request_activation
+        from panelo.desktop.instance import request_activation
 
         request_activation(server.server_name, startup_timeout_ms=1_000, retry_interval_ms=5, attempt_timeout_ms=100)
     finally:
@@ -234,7 +234,7 @@ def test_activation_client_fails_after_bounded_not_ready_wait(qapplication: QApp
     server = ActivationServer(f"phase6-busy-{uuid4().hex}", lambda: ActivationResponse.BUSY)
     server.start()
     try:
-        from productivity_app.desktop.instance import request_activation
+        from panelo.desktop.instance import request_activation
 
         with pytest.raises(SingleInstanceError):
             request_activation(server.server_name, startup_timeout_ms=50, retry_interval_ms=5, attempt_timeout_ms=20)
@@ -310,7 +310,7 @@ class _CleanupMutex(_Mutex):
 
 
 def test_secondary_launch_activates_without_creating_backend(qapplication: QApplication, monkeypatch, app_config) -> None:
-    from productivity_app.desktop import main as desktop_main
+    from panelo.desktop import main as desktop_main
 
     created: list[object] = []
     activated: list[str] = []
@@ -335,7 +335,7 @@ def test_secondary_launch_activates_without_creating_backend(qapplication: QAppl
 def test_secondary_ipc_failure_fails_closed_without_creating_backend(
     qapplication: QApplication, monkeypatch, app_config
 ) -> None:
-    from productivity_app.desktop import main as desktop_main
+    from panelo.desktop import main as desktop_main
 
     created: list[object] = []
     mutex = _Mutex(primary=False)
@@ -359,7 +359,7 @@ def test_secondary_ipc_failure_fails_closed_without_creating_backend(
 
 
 def test_primary_starts_ipc_before_backend_and_cleans_up_start_failure(qapplication: QApplication, monkeypatch, app_config) -> None:
-    from productivity_app.desktop import main as desktop_main
+    from panelo.desktop import main as desktop_main
 
     calls: list[str] = []
     mutex = _Mutex(primary=True)
@@ -386,8 +386,8 @@ def test_primary_starts_ipc_before_backend_and_cleans_up_start_failure(qapplicat
 def test_expected_startup_failures_return_controlled_status(
     qapplication: QApplication, monkeypatch, app_config, failure: str
 ) -> None:
-    from productivity_app.core.exceptions import DatabaseError
-    from productivity_app.desktop import main as desktop_main
+    from panelo.core.exceptions import DatabaseError
+    from panelo.desktop import main as desktop_main
 
     created: list[str] = []
     mutex = _Mutex(primary=True)
@@ -431,7 +431,7 @@ def test_expected_startup_failures_return_controlled_status(
 def test_startup_cleanup_attempts_all_resources_after_backend_close_failure(
     qapplication: QApplication, monkeypatch, app_config, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from productivity_app.desktop import main as desktop_main
+    from panelo.desktop import main as desktop_main
 
     backend = _Backend(close_error=RuntimeError("backend cleanup failed"))
     mutex = _CleanupMutex(close_error=RuntimeError("mutex cleanup failed"))
@@ -445,7 +445,7 @@ def test_startup_cleanup_attempts_all_resources_after_backend_close_failure(
 
     monkeypatch.setattr(desktop_main, "build_desktop", _BrokenController)
     try:
-        with caplog.at_level(logging.ERROR, logger="productivity_app.desktop"):
+        with caplog.at_level(logging.ERROR, logger="panelo.desktop"):
             assert run_desktop(
                 [],
                 config=app_config,
@@ -468,7 +468,7 @@ def test_startup_cleanup_attempts_all_resources_after_backend_close_failure(
 def test_windows_adapter_is_import_safe_and_non_windows_calls_fail_lazily() -> None:
     if __import__("sys").platform == "win32":
         pytest.skip("The real Windows adapter is covered by the integration test.")
-    from productivity_app.windows.mutex import WindowsMutexBackend
+    from panelo.windows.mutex import WindowsMutexBackend
 
     with pytest.raises(PlatformNotSupportedError):
         WindowsMutexBackend().acquire("opaque")
@@ -481,10 +481,10 @@ def test_shell_modules_import_without_creating_a_qapplication_or_backend() -> No
         "os.environ['QT_QPA_PLATFORM'] = 'offscreen'\n"
         "from PySide6.QtWidgets import QApplication\n"
         "assert QApplication.instance() is None\n"
-        "import productivity_app.desktop.hotkey\n"
-        "import productivity_app.desktop.instance\n"
-        "import productivity_app.desktop.main\n"
-        "import productivity_app.desktop.startup\n"
+        "import panelo.desktop.hotkey\n"
+        "import panelo.desktop.instance\n"
+        "import panelo.desktop.main\n"
+        "import panelo.desktop.startup\n"
         "assert QApplication.instance() is None\n"
     )
     root = Path(__file__).parents[2]
@@ -492,3 +492,43 @@ def test_shell_modules_import_without_creating_a_qapplication_or_backend() -> No
         [sys.executable, "-c", code], cwd=root, capture_output=True, text=True, timeout=30
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_injected_config_skips_data_migration_but_honours_injected_legacy_registry(
+    qapplication: QApplication, monkeypatch, app_config, tmp_path: Path
+) -> None:
+    from panelo.desktop import main as desktop_main
+    from panelo.ui.selftest.harness import FakeStartupRegistry
+
+    def no_data_migration(*_args: Any) -> Any:
+        raise AssertionError("custom configurations must never migrate real per-user data")
+
+    monkeypatch.setattr(desktop_main, "migrate_legacy_data_safely", no_data_migration)
+    monkeypatch.setattr(desktop_main, "ActivationServer", _Server)
+    built: list[Any] = []
+
+    class _StopAfterBuild:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            built.append(kwargs)
+            raise RuntimeError("stop here")
+
+    monkeypatch.setattr(desktop_main, "build_desktop", _StopAfterBuild)
+    launcher = tmp_path / "panelo.exe"
+    launcher.write_bytes(b"")
+    legacy, current = FakeStartupRegistry(), FakeStartupRegistry()
+    legacy.write("old")
+    assert run_desktop(
+        [],
+        config=app_config,
+        backend_factory=lambda _config: cast(Any, _Backend()),
+        mutex_backend=cast(Any, _MutexBackend(_Mutex(primary=True))),
+        sid_provider=lambda: "S-1-5-21-test",
+        qapplication=qapplication,
+        startup_registry=current,
+        startup_launcher=launcher,
+        legacy_startup_registry=legacy,
+        execute=False,
+    ) == 1
+    assert legacy.inspect() is None
+    assert current.inspect() is not None and "panelo.exe" in str(current.inspect().value)
+    assert built and built[0]["startup_registry"] is current

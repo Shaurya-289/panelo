@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.search import UnifiedSearchQuery
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.schemas.timers import CreateTimer, CreateTimerPreset
+from panelo.schemas.notes import CreateNote
+from panelo.schemas.search import UnifiedSearchQuery
+from panelo.schemas.tasks import CreateTask
+from panelo.schemas.timers import CreateTimer, CreateTimerPreset
 
 
 def test_unified_search_ranks_projects_and_is_read_only(application) -> None:

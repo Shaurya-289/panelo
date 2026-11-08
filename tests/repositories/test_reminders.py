@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from productivity_app.schemas.reminders import CreateReminder, ReminderQuery
+from panelo.schemas.reminders import CreateReminder, ReminderQuery
 
 
 def test_reminder_repository_claims_one_version_and_filters_timing(application, clock) -> None:

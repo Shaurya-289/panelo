@@ -7,12 +7,12 @@ from typing import Any
 
 import pytest
 
-from productivity_app.core.exceptions import (
+from panelo.core.exceptions import (
     HotkeyRegistrationError,
     StaleVersionError,
 )
-from productivity_app.desktop.errors import StartupRegistrationError
-from productivity_app.desktop.hotkey import (
+from panelo.desktop.errors import StartupRegistrationError
+from panelo.desktop.hotkey import (
     MOD_ALT,
     MOD_CONTROL,
     MOD_NOREPEAT,
@@ -21,13 +21,13 @@ from productivity_app.desktop.hotkey import (
     _NativeFilter,
     parse_hotkey,
 )
-from productivity_app.desktop.startup import (
+from panelo.desktop.startup import (
     StartupCoordinator,
     StartupState,
     build_startup_command,
     quote_windows_argument,
 )
-from productivity_app.windows.startup import REG_SZ, RegistryValue, WindowsStartupRegistry
+from panelo.windows.startup import REG_SZ, RegistryValue, WindowsStartupRegistry
 
 
 @dataclass

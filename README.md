@@ -1,4 +1,6 @@
-# Productivity App
+<img src="src/panelo/ui/icons/app-icon.svg" width="96">
+
+# Panelo
 
 A local-first productivity app for Windows: notes, tasks, repeating reminders, timers and focus
 sessions, a files library, full-text search, trash with a 30-day purge, and automatic
@@ -58,8 +60,8 @@ The UI has two modes:
    Then close and reopen PowerShell.
 2. **Download the code:**
    ```powershell
-   git clone https://github.com/Shaurya-289/productivity-app.git
-   cd productivity-app
+   git clone https://github.com/Shaurya-289/panelo.git
+   cd panelo
    ```
 3. **Install the dependencies:**
    ```powershell
@@ -67,7 +69,7 @@ The UI has two modes:
    ```
 4. **Start the app:**
    ```powershell
-   uv run python -m productivity_app.desktop
+   uv run python -m panelo.desktop
    ```
 
 ### Using it
@@ -86,23 +88,26 @@ The UI has two modes:
 
 ```powershell
 # The app (a second launch just asks the running one to show itself)
-uv run python -m productivity_app.desktop
+uv run python -m panelo.desktop
 
 # Start hidden in the tray (what "Start with Windows" uses); add --show to also open the window
-uv run python -m productivity_app.desktop --startup
+uv run python -m panelo.desktop --startup
 
 # Automated UI checks: opens real windows on screen, runs on a temporary database and library
-uv run python -m productivity_app.desktop --selftest
+uv run python -m panelo.desktop --selftest
 
 # Backend only (initializes/migrates the database, then exits)
-uv run python -m productivity_app
+uv run python -m panelo
 ```
 
 `--startup` is what the "Start with Windows" entry runs: it starts hidden in the tray unless
 `--show` is also given. The first launch shows the welcome tour.
 
-Data and logs live in per-user directories chosen by `platformdirs` (app name
-`ProductivityApp`); the database file is `productivity.db`. The Files library defaults to a
+Data and logs live in per-user directories chosen by `platformdirs` (app name `Panelo`, e.g.
+`%LOCALAPPDATA%\Panelo\Panelo`); the database file is `panelo.db`, the log `panelo.log`, and
+backups are named `panelo-backup-*`. Panelo was previously called ProductivityApp: on first launch
+it copies any existing data from `%LOCALAPPDATA%\ProductivityApp\ProductivityApp` automatically
+(the old folder is left in place). The Files library defaults to a
 `Files` folder in the data directory and can be moved in Settings.
 
 ## Development and testing
@@ -112,14 +117,14 @@ uv run pytest                  # all tests, with coverage (Qt runs offscreen)
 uv run pytest tests/ui         # just the UI bridge tests
 uv run ruff check .            # lint
 uv run mypy                    # strict type checking
-$env:QT_FORCE_STDERR_LOGGING = "1"; uv run python -m productivity_app.desktop --selftest
+$env:QT_FORCE_STDERR_LOGGING = "1"; uv run python -m panelo.desktop --selftest
 ```
 
 Tests use temporary databases and never touch the real data directory, registry Run key or
 Recycle Bin. `--selftest` takes a few minutes and should finish with every check passing and no
 QML warnings on stderr.
 
-## Layout (`src/productivity_app/`)
+## Layout (`src/panelo/`)
 
 | Package | Role |
 |---|---|

@@ -5,12 +5,12 @@ import sqlite3
 import pytest
 from sqlalchemy import text
 
-from productivity_app.repositories.search import SearchRepository
-from productivity_app.schemas.notes import CreateNote, UpdateNote
-from productivity_app.schemas.reminders import CreateReminder, UpdateReminder
-from productivity_app.schemas.search import FullTextSearchQuery
-from productivity_app.schemas.tasks import CreateTask, UpdateTask
-from productivity_app.schemas.timers import (
+from panelo.repositories.search import SearchRepository
+from panelo.schemas.notes import CreateNote, UpdateNote
+from panelo.schemas.reminders import CreateReminder, UpdateReminder
+from panelo.schemas.search import FullTextSearchQuery
+from panelo.schemas.tasks import CreateTask, UpdateTask
+from panelo.schemas.timers import (
     CreateTimer,
     CreateTimerPreset,
     UpdateTimer,

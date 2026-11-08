@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from productivity_app.core.recurrence import (
+from panelo.core.recurrence import (
     RepeatRule,
     advance,
     align_due,

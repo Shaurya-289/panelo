@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from productivity_app.core.events import InProcessEventBus
-from productivity_app.core.exceptions import StaleVersionError, ValidationError
-from productivity_app.db.unit_of_work import create_unit_of_work_factory
-from productivity_app.schemas.notes import CreateNote, NoteQuery, NoteSearchQuery, UpdateNote
-from productivity_app.services.notes import NoteService
+from panelo.core.events import InProcessEventBus
+from panelo.core.exceptions import StaleVersionError, ValidationError
+from panelo.db.unit_of_work import create_unit_of_work_factory
+from panelo.schemas.notes import CreateNote, NoteQuery, NoteSearchQuery, UpdateNote
+from panelo.services.notes import NoteService
 
 
 def test_stale_claims_cover_every_note_mutator(application) -> None:

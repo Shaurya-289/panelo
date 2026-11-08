@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.bootstrap import Application
-from productivity_app.ui.bridge.backend import Backend
+from panelo.bootstrap import Application
+from panelo.ui.bridge.backend import Backend
 from tests.conftest import FakeClock
 
 

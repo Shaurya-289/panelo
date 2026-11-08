@@ -7,16 +7,16 @@ import os
 import pytest
 from sqlalchemy import text
 
-import productivity_app.bootstrap as bootstrap_module
-import productivity_app.db.unit_of_work as uow_module
-from productivity_app.core.exceptions import (
+import panelo.bootstrap as bootstrap_module
+import panelo.db.unit_of_work as uow_module
+from panelo.core.exceptions import (
     ApplicationLifecycleError,
     BackupError,
     BackupRestoreError,
     BackupValidationError,
 )
-from productivity_app.schemas.backups import DeleteBackup, RestoreBackup
-from productivity_app.schemas.tasks import CreateTask
+from panelo.schemas.backups import DeleteBackup, RestoreBackup
+from panelo.schemas.tasks import CreateTask
 
 
 def test_captured_repository_and_session_are_unusable_after_uow_exit(application) -> None:
@@ -61,7 +61,7 @@ def test_backup_publication_retries_filename_collision_without_overwrite(applica
             raise FileExistsError("simulated collision")
         return real_link(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr("productivity_app.services.backups.os.link", collide_once)
+    monkeypatch.setattr("panelo.services.backups.os.link", collide_once)
     created = application.backups.create_backup()
 
     assert attempts == 2
@@ -225,7 +225,7 @@ def test_backup_staging_fsync_and_copy_failures_are_operational_errors(applicati
         raise OSError("flush failed")
 
     with monkeypatch.context() as context:
-        context.setattr("productivity_app.services.backups.os.fsync", fsync_failure)
+        context.setattr("panelo.services.backups.os.fsync", fsync_failure)
         with pytest.raises(BackupError) as fsync_error:
             application.backups.create_backup()
     assert isinstance(fsync_error.value.__cause__, OSError)

@@ -6,14 +6,14 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import text
 
-from productivity_app.core.exceptions import (
+from panelo.core.exceptions import (
     NotFoundError,
     StaleVersionError,
     ValidationError,
 )
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.reminders import CreateReminder, SnoozeReminder, UpdateReminder
-from productivity_app.schemas.tasks import CreateTask
+from panelo.schemas.notes import CreateNote
+from panelo.schemas.reminders import CreateReminder, SnoozeReminder, UpdateReminder
+from panelo.schemas.tasks import CreateTask
 
 
 def _events(application, event_type: str) -> list:

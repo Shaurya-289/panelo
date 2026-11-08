@@ -4,13 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from productivity_app.core.exceptions import (
+from panelo.core.exceptions import (
     InvalidStateTransitionError,
     NotFoundError,
     StaleVersionError,
     ValidationError,
 )
-from productivity_app.schemas.tasks import (
+from panelo.schemas.tasks import (
     CreateTask,
     TaskCalendarQuery,
     TaskPageQuery,

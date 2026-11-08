@@ -3,8 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
-from productivity_app.core.exceptions import StaleVersionError
-from productivity_app.schemas.reminders import CreateReminder, UpdateReminder
+from panelo.core.exceptions import StaleVersionError
+from panelo.schemas.reminders import CreateReminder, UpdateReminder
 
 
 def test_concurrent_reminder_updates_have_one_winner(application, clock) -> None:

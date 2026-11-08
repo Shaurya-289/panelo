@@ -9,8 +9,8 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.core.events import DomainEvent
-from productivity_app.core.exceptions import (
+from panelo.core.events import DomainEvent
+from panelo.core.exceptions import (
     ConflictError,
     DuplicateNameError,
     InvalidStateTransitionError,
@@ -18,12 +18,12 @@ from productivity_app.core.exceptions import (
     StaleVersionError,
     ValidationError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.db.types import datetime_to_epoch_microseconds
-from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
-from productivity_app.repositories.timers import TimerRepository
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.schemas.timers import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.db.types import datetime_to_epoch_microseconds
+from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
+from panelo.repositories.timers import TimerRepository
+from panelo.schemas.tasks import CreateTask
+from panelo.schemas.timers import (
     CreateTimer,
     CreateTimerPreset,
     MoveTimerPreset,
@@ -33,7 +33,7 @@ from productivity_app.schemas.timers import (
     UpdateTimer,
     UpdateTimerPreset,
 )
-from productivity_app.services.timers import _translate
+from panelo.services.timers import _translate
 
 _TIMER_EVENTS = (
     "TIMER_CREATED",

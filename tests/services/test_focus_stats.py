@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
-from productivity_app.schemas.focus import CreateFocusSession, DailyFocusTotal
+from panelo.schemas.focus import CreateFocusSession, DailyFocusTotal
 
 NEW_YORK = ZoneInfo("America/New_York")
 KOLKATA = ZoneInfo("Asia/Kolkata")

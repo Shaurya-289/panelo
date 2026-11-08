@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from productivity_app.core.exceptions import DuplicateNameError
-from productivity_app.schemas.timers import (
+from panelo.core.exceptions import DuplicateNameError
+from panelo.schemas.timers import (
     CreateTimer,
     CreateTimerPreset,
     MoveTimerPreset,

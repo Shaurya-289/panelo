@@ -11,9 +11,9 @@ import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.files.library import FileLibrary
-from productivity_app.ui.bridge import library as library_module
-from productivity_app.ui.bridge.library import Library
+from panelo.files.library import FileLibrary
+from panelo.ui.bridge import library as library_module
+from panelo.ui.bridge.library import Library
 
 
 class BinSpy:

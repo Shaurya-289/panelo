@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from productivity_app.core.exceptions import BackupError
-from productivity_app.core.ids import Uuid4Generator
-from productivity_app.core.lifecycle import ApplicationLifecycleGate
-from productivity_app.schemas.backups import BackupPageQuery, RestoreBackup, ValidateBackup
-from productivity_app.schemas.settings import SettingsPatch
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.services.backups import BackupService
+from panelo.core.exceptions import BackupError
+from panelo.core.ids import Uuid4Generator
+from panelo.core.lifecycle import ApplicationLifecycleGate
+from panelo.schemas.backups import BackupPageQuery, RestoreBackup, ValidateBackup
+from panelo.schemas.settings import SettingsPatch
+from panelo.schemas.tasks import CreateTask
+from panelo.services.backups import BackupService
 
 DAY = timedelta(days=1)
 
@@ -152,13 +152,13 @@ def test_pruning_leaves_unmanaged_files_alone(application, clock) -> None:
     directory = application.backups.backup_directory
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "notes.txt").write_text("mine", encoding="utf-8")
-    (directory / "productivity-backup-not-a-real-name.sqlite3").write_text("x", encoding="utf-8")
+    (directory / "panelo-backup-not-a-real-name.sqlite3").write_text("x", encoding="utf-8")
     application.backups.create_backup()
     clock.now += timedelta(hours=1)
     created = application.backups.run_auto_backup_if_due(clock.now)
     assert created is not None
     assert (directory / "notes.txt").read_text(encoding="utf-8") == "mine"
-    assert (directory / "productivity-backup-not-a-real-name.sqlite3").exists()
+    assert (directory / "panelo-backup-not-a-real-name.sqlite3").exists()
     assert [item.filename for item in _backups(application)] == [created.filename]
 
 
@@ -214,3 +214,12 @@ def test_automatic_backups_need_the_settings_service(app_config, clock) -> None:
     )
     with pytest.raises(BackupError):
         bare.run_auto_backup_if_due(datetime(2026, 9, 24, tzinfo=UTC))
+
+
+def test_backups_made_before_the_rename_are_still_listed(application) -> None:
+    created = application.backups.create_backup()
+    assert created.filename.startswith("panelo-backup-")
+    directory = application.backups.backup_directory
+    legacy = created.filename.replace("panelo-backup-", "productivity-backup-", 1)
+    (directory / legacy).write_bytes((directory / created.filename).read_bytes())
+    assert {item.filename for item in _backups(application)} == {created.filename, legacy}

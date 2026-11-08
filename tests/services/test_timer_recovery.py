@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from productivity_app.schemas.timers import CreateTimer
+from panelo.schemas.timers import CreateTimer
 
 
 def test_running_timer_recovers_natural_completion_on_bounded_reconcile(application, clock) -> None:
@@ -40,7 +40,7 @@ def test_every_expired_timer_is_recovered_in_one_pass(application, clock) -> Non
 
 
 def test_restart_reconciles_timers_that_expired_while_closed(app_config, clock) -> None:
-    from productivity_app.bootstrap import create_application
+    from panelo.bootstrap import create_application
 
     first = create_application(app_config, clock)
     try:

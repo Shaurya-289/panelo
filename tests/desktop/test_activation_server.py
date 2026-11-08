@@ -8,7 +8,7 @@ from uuid import uuid4
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtNetwork import QLocalSocket
 
-from productivity_app.desktop.instance import ActivationResponse, ActivationServer
+from panelo.desktop.instance import ActivationResponse, ActivationServer
 
 
 def _activation_request(server: ActivationServer) -> bytes:

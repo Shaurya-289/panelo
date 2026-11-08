@@ -4,8 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
 
-from productivity_app.core.exceptions import InvalidStateTransitionError, StaleVersionError
-from productivity_app.schemas.timers import CreateTimer
+from panelo.core.exceptions import InvalidStateTransitionError, StaleVersionError
+from panelo.schemas.timers import CreateTimer
 
 
 def test_paused_timer_does_not_block_other_timers(application, clock) -> None:

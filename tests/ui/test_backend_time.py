@@ -7,11 +7,11 @@ from typing import Any
 
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.bootstrap import Application
-from productivity_app.schemas.notes import CreateNote
-from productivity_app.schemas.reminders import CreateReminder
-from productivity_app.ui.bridge.backend import Backend
-from productivity_app.ui.bridge.scheduler import Scheduler
+from panelo.bootstrap import Application
+from panelo.schemas.notes import CreateNote
+from panelo.schemas.reminders import CreateReminder
+from panelo.ui.bridge.backend import Backend
+from panelo.ui.bridge.scheduler import Scheduler
 from tests.conftest import FakeClock
 from tests.ui.conftest import listing, ms
 
@@ -362,7 +362,7 @@ def test_start_with_windows_goes_through_the_shell_handler(backend: Backend) -> 
 def test_settings_changed_elsewhere_reach_the_pages(
     backend: Backend, application: Application, qapp: QApplication
 ) -> None:
-    from productivity_app.schemas.settings import SettingsPatch
+    from panelo.schemas.settings import SettingsPatch
 
     version = application.settings.get_settings().version
     application.settings.update_settings(SettingsPatch(expected_version=version, user_name="Mira"))

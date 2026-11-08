@@ -3,10 +3,10 @@
 ## Context
 The new Qt Quick UI is fully designed and approved in `prototype/`, which runs on fake data in
 `prototype/qml/Proto/Store.qml`. The design specs are in `prototype/PLAN-*.md`. The real backend in
-`src/productivity_app/` is a tested SQLite service layer: 633 non-desktop tests pass, and the
+`src/panelo/` is a tested SQLite service layer: 633 non-desktop tests pass, and the
 `tests/desktop/` tests cover the OLD Widgets UI.
 
-**Goal:** the shipped app (`python -m productivity_app.desktop`) is the new UI, running on the real
+**Goal:** the shipped app (`python -m panelo.desktop`) is the new UI, running on the real
 backend, with the backend changed to support the new design. The old UI is removed and everything is
 tested. Work happens in three phases. **Each phase ends green** (all tests passing, ruff and mypy
 clean) **and is committed locally** (no push).
@@ -21,7 +21,7 @@ clean) **and is committed locally** (no push).
 
 ---
 
-## Phase 1: Backend changes (the `src/productivity_app` service layer)
+## Phase 1: Backend changes (the `src/panelo` service layer)
 Add a single new Alembic migration, `20261103_0003_new_design.py`, that keeps the existing data. It
 uses batch mode for SQLite and must have a working downgrade. Update the models, schemas,
 repositories, services, events and search to match, and update and add tests.
@@ -111,7 +111,7 @@ repositories, services, events and search to match, and update and add tests.
     minutes)]` and `streak(tz)` (consecutive days up to today with ≥1 completed focus session). Use
     them for "Today · Week (rolling 7 days) · streak".
 11. **Files library (no database).** Move `prototype/files.py`'s `FileLibrary` logic into
-    `src/productivity_app/files/library.py`. Make it pure Python where possible, with a thin Qt
+    `src/panelo/files/library.py`. Make it pure Python where possible, with a thin Qt
     adapter in phase 2. Its root is the setting `library_path`, or
     `platformdirs.user_data_dir/Files`. Keep the path-escape guard, the name-clash " (2)" naming,
     and moving to the Recycle Bin via `QFile.moveToTrash` (in the adapter). Port its selftest
@@ -128,11 +128,11 @@ repositories, services, events and search to match, and update and add tests.
 
 ## Phase 2: Connect the new UI to the backend (new real app package)
 1. **Move the UI into the package:**
-   - `prototype/qml` → `src/productivity_app/ui/qml`, with the `Proto` module renamed `App`.
-   - Fonts → `src/productivity_app/ui/fonts`.
+   - `prototype/qml` → `src/panelo/ui/qml`, with the `Proto` module renamed `App`.
+   - Fonts → `src/panelo/ui/fonts`.
    - Make sure hatch includes these non-Python files in the wheel (`[tool.hatch.build]` include
      patterns).
-2. **A Python bridge, `src/productivity_app/ui/bridge/`.** These are QObjects registered as context
+2. **A Python bridge, `src/panelo/ui/bridge/`.** These are QObjects registered as context
    properties or singletons:
    - **Keep `Store.qml`'s public API** (property and function names the pages use) so the QML pages
      change as little as possible. **Re-implement `Store.qml` as a thin QML facade over a Python
@@ -166,7 +166,7 @@ repositories, services, events and search to match, and update and add tests.
    `reconcile_expired_timers`, focus phase completion, the 30-day trash purge (at startup + hourly),
    and `run_auto_backup_if_due` (at startup + hourly).
 4. **Shell:**
-   - Port `prototype/app.py`'s `Controller` into `src/productivity_app/desktop/`. That covers the
+   - Port `prototype/app.py`'s `Controller` into `src/panelo/desktop/`. That covers the
      hotkey state machine, overlay, morph, Full App, toast, tray, snapshot/wallpaper providers,
      fullscreen focus and sound player.
    - Reuse the existing real pieces:
@@ -175,7 +175,7 @@ repositories, services, events and search to match, and update and add tests.
        setting)
      - `desktop/hotkey.py` `HotkeyManager` (the hotkey stored in settings)
      - `windows/presentation.py`
-   - `python -m productivity_app.desktop [--startup] [--show]` launches the new UI. `--startup`
+   - `python -m panelo.desktop [--startup] [--show]` launches the new UI. `--startup`
      starts hidden in the tray, and the first launch shows the tour (`tour_done`).
 5. **Tests:**
    - Port the prototype's `--selftest` checks into the real app as `--selftest`. It runs against a
@@ -194,7 +194,7 @@ repositories, services, events and search to match, and update and add tests.
 ---
 
 ## Phase 3: Remove the old UI, clean up
-1. **Delete the old Widgets UI:** `src/productivity_app/desktop/ui/`, the old `window.py`/`controller.py`
+1. **Delete the old Widgets UI:** `src/panelo/desktop/ui/`, the old `window.py`/`controller.py`
    if they're superseded, and anything else only it used. Delete the `tests/desktop/` tests that test
    the removed code, and keep or port the ones that test the reused shell pieces (instance, hotkey,
    startup, mutex, presentation).

@@ -11,9 +11,9 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import text
 
-from productivity_app.core.exceptions import NotFoundError, StaleVersionError
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.schemas.tasks import (
+from panelo.core.exceptions import NotFoundError, StaleVersionError
+from panelo.db.engine import create_sqlite_engine
+from panelo.schemas.tasks import (
     CreateTask,
     TaskCalendarQuery,
     TaskPageQuery,

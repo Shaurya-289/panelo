@@ -7,13 +7,13 @@ from threading import Barrier
 
 import pytest
 
-from productivity_app.core.events import DomainEvent
-from productivity_app.core.exceptions import (
+from panelo.core.events import DomainEvent
+from panelo.core.exceptions import (
     InvalidStateTransitionError,
     StaleVersionError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.schemas.timers import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.schemas.timers import (
     CreateTimer,
     CreateTimerPreset,
     MoveTimerPreset,

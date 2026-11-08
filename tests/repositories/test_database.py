@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.db.models.initial import AppSettings
+from panelo.db.engine import create_sqlite_engine
+from panelo.db.models.initial import AppSettings
 
 
 def test_sqlite_pragmas_are_enabled(application) -> None:

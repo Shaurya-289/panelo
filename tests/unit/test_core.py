@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from productivity_app.core.exceptions import ValidationError
-from productivity_app.core.normalization import normalize_label
-from productivity_app.db.types import UTCDateTime, require_aware_utc
+from panelo.core.exceptions import ValidationError
+from panelo.core.normalization import normalize_label
+from panelo.db.types import UTCDateTime, require_aware_utc
 
 
 def test_normalize_label_applies_nfkc_whitespace_and_casefold() -> None:

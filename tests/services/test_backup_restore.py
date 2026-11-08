@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from productivity_app.bootstrap import Application
-from productivity_app.core.exceptions import (
+from panelo.bootstrap import Application
+from panelo.core.exceptions import (
     ApplicationLifecycleError,
     BackupRestoreError,
 )
-from productivity_app.repositories.search import SearchRepository
-from productivity_app.schemas.backups import RestoreBackup
-from productivity_app.schemas.search import FullTextSearchQuery
-from productivity_app.schemas.tasks import CreateTask, UpdateTask
-from productivity_app.services.search import SearchService
+from panelo.repositories.search import SearchRepository
+from panelo.schemas.backups import RestoreBackup
+from panelo.schemas.search import FullTextSearchQuery
+from panelo.schemas.tasks import CreateTask, UpdateTask
+from panelo.services.search import SearchService
 
 
 def test_restore_replaces_runtime_and_retains_pre_restore_backup(application) -> None:

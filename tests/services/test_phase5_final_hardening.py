@@ -12,10 +12,10 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import text
 
-import productivity_app.bootstrap as bootstrap_module
-import productivity_app.db.unit_of_work as uow_module
-from productivity_app.core.events import DomainEventType, InProcessEventBus
-from productivity_app.core.exceptions import (
+import panelo.bootstrap as bootstrap_module
+import panelo.db.unit_of_work as uow_module
+from panelo.core.events import DomainEventType, InProcessEventBus
+from panelo.core.exceptions import (
     ApplicationLifecycleError,
     BackupError,
     BackupRecoveryError,
@@ -25,18 +25,18 @@ from productivity_app.core.exceptions import (
     UnsupportedBackupVersionError,
     ValidationError,
 )
-from productivity_app.core.lifecycle import ApplicationLifecycleGate
-from productivity_app.schemas.backups import (
+from panelo.core.lifecycle import ApplicationLifecycleGate
+from panelo.schemas.backups import (
     BackupPageQuery,
     DeleteBackup,
     RestoreBackup,
     ValidateBackup,
 )
-from productivity_app.schemas.notes import CreateNote, UpdateNote
-from productivity_app.schemas.reminders import CreateReminder, ReminderPageQuery
-from productivity_app.schemas.search import UnifiedSearchQuery
-from productivity_app.schemas.tasks import CreateTask, UpdateTask
-from productivity_app.schemas.timers import CreateTimer, CreateTimerPreset
+from panelo.schemas.notes import CreateNote, UpdateNote
+from panelo.schemas.reminders import CreateReminder, ReminderPageQuery
+from panelo.schemas.search import UnifiedSearchQuery
+from panelo.schemas.tasks import CreateTask, UpdateTask
+from panelo.schemas.timers import CreateTimer, CreateTimerPreset
 
 
 def test_every_captured_runtime_handle_rejects_after_restore(application) -> None:
@@ -616,7 +616,7 @@ def test_post_replacement_bootstrap_failures_restore_exact_safety_state(
             return original_validate(engine)
         monkeypatch.setattr(bootstrap_module, "_validate_database_integrity", fail_once)
     elif failure == "settings":
-        from productivity_app.services.settings import SettingsService
+        from panelo.services.settings import SettingsService
         original_settings = SettingsService.get_settings
         def fail_once(self):  # type: ignore[no-untyped-def]
             nonlocal calls
@@ -626,7 +626,7 @@ def test_post_replacement_bootstrap_failures_restore_exact_safety_state(
             return original_settings(self)
         monkeypatch.setattr(SettingsService, "get_settings", fail_once)
     else:
-        from productivity_app.services.timers import TimerService
+        from panelo.services.timers import TimerService
         original_reconcile = TimerService.reconcile_expired_timers
         def fail_once(self):  # type: ignore[no-untyped-def]
             nonlocal calls
@@ -770,10 +770,10 @@ def test_repeated_runtime_swaps_publish_one_complete_new_bundle_each_time(applic
 def test_backup_collisions_preserve_existing_bytes_and_retry(application, monkeypatch) -> None:
     backup_dir = application.backups.backup_directory
     application.backups._ensure_managed_directory(create=True)
-    first_name = "productivity-backup-20260924T120000.000000Z-000000000000-manual.sqlite3"
+    first_name = "panelo-backup-20260924T120000.000000Z-000000000000-manual.sqlite3"
     sentinel = backup_dir / first_name
     sentinel.write_bytes(b"sentinel-bytes")
-    names = iter((first_name, "productivity-backup-20260924T120000.000000Z-111111111111-manual.sqlite3"))
+    names = iter((first_name, "panelo-backup-20260924T120000.000000Z-111111111111-manual.sqlite3"))
     monkeypatch.setattr(application.backups, "_filename", lambda _now, _kind: next(names))
     created = application.backups.create_backup()
     assert sentinel.read_bytes() == b"sentinel-bytes"
@@ -793,13 +793,13 @@ def test_publication_race_and_failure_never_overwrite_or_list_partial(applicatio
             sentinel.append(destination)
             raise FileExistsError("external winner")
         return real_link(source, destination, *args, **kwargs)
-    monkeypatch.setattr("productivity_app.services.backups.os.link", race_link)
+    monkeypatch.setattr("panelo.services.backups.os.link", race_link)
     created = application.backups.create_backup()
     assert sentinel and sentinel[0].read_bytes() == b"publication sentinel"
     assert created.filename != sentinel[0].name
     assert sentinel[0].name in {item.filename for item in application.backups.list_backups()}
 
-    monkeypatch.setattr("productivity_app.services.backups.os.link", lambda *_a, **_k: (_ for _ in ()).throw(OSError("publication failure")))
+    monkeypatch.setattr("panelo.services.backups.os.link", lambda *_a, **_k: (_ for _ in ()).throw(OSError("publication failure")))
     with pytest.raises(BackupError):
         application.backups.create_backup()
     assert not list(application.backups.backup_directory.glob("*.partial"))
@@ -1042,7 +1042,7 @@ def test_subscriber_failure_is_post_commit_and_events_are_not_emitted_for_rollba
     assert application.tasks.get_task(created.id).title == "durable despite subscriber"
     assert [event.entity_id for event in received] == [created.id]
 
-    from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
+    from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
 
     original_commit = SqlAlchemyUnitOfWork.commit
     monkeypatch.setattr(SqlAlchemyUnitOfWork, "commit", lambda self: (_ for _ in ()).throw(RuntimeError("commit failure")))
@@ -1261,7 +1261,7 @@ def test_valid_restore_source_swap_from_backup_a_to_backup_b_never_installs_b(
 
 def test_concurrent_backup_creators_with_same_final_name_do_not_overwrite(application, monkeypatch) -> None:
     application.tasks.create_task(CreateTask(title="concurrent backup source"))
-    filename = "productivity-backup-20260924T120000.000000Z-aaaaaaaaaaaa-manual.sqlite3"
+    filename = "panelo-backup-20260924T120000.000000Z-aaaaaaaaaaaa-manual.sqlite3"
     monkeypatch.setattr(application.backups, "_filename", lambda _now, _kind: filename)
     original_link = os.link
     publication_barrier = Barrier(2)
@@ -1277,7 +1277,7 @@ def test_concurrent_backup_creators_with_same_final_name_do_not_overwrite(applic
             publication_barrier.wait(timeout=10)
         return original_link(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr("productivity_app.services.backups.os.link", synchronized_link)
+    monkeypatch.setattr("panelo.services.backups.os.link", synchronized_link)
     results: list[object] = []
     failures: list[BaseException] = []
     start = Barrier(3)
@@ -1310,7 +1310,7 @@ def test_concurrent_backup_creators_with_same_final_name_do_not_overwrite(applic
 def test_uow_constructor_failure_closes_created_session_and_invalidates_wrapper(
     application, monkeypatch
 ) -> None:
-    from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
+    from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
 
     captured_raw_sessions: list[object] = []
     closed_sessions: list[object] = []
@@ -1561,7 +1561,7 @@ def test_backup_validation_rejects_non_ok_integrity_and_older_revision(applicati
     """Exercise the direct integrity branch and the unsupported older-revision branch."""
     artifact = application.backups.create_backup()
     source = application.backups.backup_directory / artifact.filename
-    import productivity_app.services.backups as backups_module
+    import panelo.services.backups as backups_module
 
     original_connect = backups_module.sqlite3.connect
 

@@ -16,13 +16,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Connection, create_engine, inspect, text
 
-from productivity_app.bootstrap import _alembic_config, create_application
-from productivity_app.core.config import AppConfig, DatabaseConfig
-from productivity_app.core.paths import AppPaths
-from productivity_app.db import models  # noqa: F401 - imports the mappings into the metadata
-from productivity_app.db.base import Base
-from productivity_app.db.engine import create_sqlite_engine, sqlite_url
-from productivity_app.db.fts_contract import EXPECTED_NORMALIZED_FTS_TRIGGER_SQL, normalize_fts_sql
+from panelo.bootstrap import _alembic_config, create_application
+from panelo.core.config import AppConfig, DatabaseConfig
+from panelo.core.paths import AppPaths
+from panelo.db import models  # noqa: F401 - imports the mappings into the metadata
+from panelo.db.base import Base
+from panelo.db.engine import create_sqlite_engine, sqlite_url
+from panelo.db.fts_contract import EXPECTED_NORMALIZED_FTS_TRIGGER_SQL, normalize_fts_sql
 
 PREVIOUS = "20261002_0002"
 HEAD = "20261103_0003"

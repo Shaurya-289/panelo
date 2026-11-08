@@ -6,22 +6,22 @@ from datetime import timedelta
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.core.events import DomainEvent
-from productivity_app.core.exceptions import (
+from panelo.core.events import DomainEvent
+from panelo.core.exceptions import (
     ConflictError,
     InvalidStateTransitionError,
     StaleVersionError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
-from productivity_app.repositories.focus import FocusRepository
-from productivity_app.schemas.focus import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
+from panelo.repositories.focus import FocusRepository
+from panelo.schemas.focus import (
     AdvanceFocusSequence,
     CancelFocusSequence,
     CreateFocusSequence,
 )
-from productivity_app.schemas.timers import UpdateTimer
-from productivity_app.services.focus import FocusService
+from panelo.schemas.timers import UpdateTimer
+from panelo.services.focus import FocusService
 
 
 def _rows(app_config, sql: str, params: dict[str, object] | None = None) -> list[tuple[object, ...]]:

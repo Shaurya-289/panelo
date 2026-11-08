@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from productivity_app.schemas.tasks import CreateTask, TaskQuery
+from panelo.schemas.tasks import CreateTask, TaskQuery
 
 
 def test_repository_backed_task_filters(application) -> None:

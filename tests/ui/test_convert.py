@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from productivity_app.schemas.reminders import ReminderRepeat
-from productivity_app.ui.bridge import convert
+from panelo.schemas.reminders import ReminderRepeat
+from panelo.ui.bridge import convert
 
 
 def test_milliseconds_round_trip() -> None:

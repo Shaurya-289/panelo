@@ -5,13 +5,13 @@ import uuid
 
 import pytest
 
-from productivity_app.windows.mutex import WindowsMutexBackend
+from panelo.windows.mutex import WindowsMutexBackend
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows named mutex integration test")
 def test_real_windows_mutex_reports_existing_then_can_be_reacquired() -> None:
     backend = WindowsMutexBackend()
-    identity = f"ProductivityApp-test-{uuid.uuid4().hex}"
+    identity = f"Panelo-test-{uuid.uuid4().hex}"
     first = backend.acquire(identity)
     second = backend.acquire(identity)
     assert first.primary is True

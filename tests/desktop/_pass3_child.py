@@ -15,19 +15,19 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
-from productivity_app.core.exceptions import HotkeyRegistrationError
-from productivity_app.desktop.instance import (
+from panelo.core.exceptions import HotkeyRegistrationError
+from panelo.desktop.instance import (
     ActivationResponse,
     ActivationServer,
     request_activation,
 )
-from productivity_app.windows.hotkeys import (
+from panelo.windows.hotkeys import (
     MOD_ALT,
     MOD_CONTROL,
     MOD_NOREPEAT,
     WindowsHotkeyBackend,
 )
-from productivity_app.windows.mutex import WindowsMutexBackend
+from panelo.windows.mutex import WindowsMutexBackend
 
 
 def main() -> None:

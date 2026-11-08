@@ -8,10 +8,10 @@ from threading import Barrier, Event
 
 import pytest
 
-from productivity_app.core.exceptions import BackupValidationError, NotFoundError, ValidationError
-from productivity_app.db.fts_contract import EXPECTED_FTS_TRIGGER_SQL
-from productivity_app.schemas.backups import BackupPageQuery, DeleteBackup, ValidateBackup
-from productivity_app.schemas.tasks import CreateTask, UpdateTask
+from panelo.core.exceptions import BackupValidationError, NotFoundError, ValidationError
+from panelo.db.fts_contract import EXPECTED_FTS_TRIGGER_SQL
+from panelo.schemas.backups import BackupPageQuery, DeleteBackup, ValidateBackup
+from panelo.schemas.tasks import CreateTask, UpdateTask
 
 
 def test_native_backup_is_standalone_validated_and_managed(application) -> None:
@@ -266,8 +266,8 @@ def test_backup_during_uncommitted_multi_entity_indexed_transaction_is_atomic(
 def test_backup_made_before_the_new_design_schema_is_rejected_not_restored(application, tmp_path) -> None:
     from alembic import command
 
-    from productivity_app.bootstrap import _alembic_config
-    from productivity_app.db.engine import sqlite_url
+    from panelo.bootstrap import _alembic_config
+    from panelo.db.engine import sqlite_url
 
     previous = tmp_path / "previous-schema.sqlite3"
     command.upgrade(_alembic_config(sqlite_url(previous), 5_000), "20261002_0002")

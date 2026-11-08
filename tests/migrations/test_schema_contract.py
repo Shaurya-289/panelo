@@ -11,8 +11,8 @@ from pathlib import Path
 from alembic import command
 from sqlalchemy import inspect, text
 
-from productivity_app.bootstrap import _alembic_config
-from productivity_app.db.engine import create_sqlite_engine, sqlite_url
+from panelo.bootstrap import _alembic_config
+from panelo.db.engine import create_sqlite_engine, sqlite_url
 
 _COLUMNS: dict[str, tuple[tuple[str, str, bool, int], ...]] = {
     "folders": (("id", "VARCHAR(36)", False, 1), ("name", "VARCHAR(120)", False, 0), ("normalized_name", "VARCHAR(120)", False, 0), ("parent_id", "VARCHAR(36)", True, 0), ("sort_order", "INTEGER", False, 0), ("deleted_at_utc", "BIGINT", True, 0), ("created_at_utc", "BIGINT", False, 0), ("updated_at_utc", "BIGINT", False, 0), ("version", "INTEGER", False, 0)),

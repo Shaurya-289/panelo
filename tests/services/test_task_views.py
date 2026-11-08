@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from productivity_app.schemas.tasks import CreateTask, TaskCalendarQuery, TaskPageQuery
+from panelo.schemas.tasks import CreateTask, TaskCalendarQuery, TaskPageQuery
 
 
 def test_calendar_window_uses_local_midnights_across_dst(application, clock) -> None:

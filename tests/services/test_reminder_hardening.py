@@ -7,20 +7,20 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.core.exceptions import (
+from panelo.core.exceptions import (
     InvalidStateTransitionError,
     NotFoundError,
     ValidationError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.repositories.reminders import ReminderRepository
-from productivity_app.schemas.reminders import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.repositories.reminders import ReminderRepository
+from panelo.schemas.reminders import (
     CreateReminder,
     ReminderQuery,
     SnoozeReminder,
     UpdateReminder,
 )
-from productivity_app.schemas.tasks import CreateTask
+from panelo.schemas.tasks import CreateTask
 
 
 def _bus(application):

@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "productivity-app"
+name = "panelo"
 version = "0.1.0"
-description = "Local-first productivity application backend"
+description = "Panelo: a local-first productivity app for Windows"
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14,<2",
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.gui-scripts]
-productivity-app = "productivity_app.desktop.main:main"
+panelo = "panelo.desktop.main:main"
 
 [dependency-groups]
 dev = [
@@ -28,16 +28,16 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/productivity_app"]
+packages = ["src/panelo"]
 # The QML pages, their JavaScript helpers and the font are data files inside the package.
 artifacts = [
-  "src/productivity_app/ui/qml/**/*",
-  "src/productivity_app/ui/fonts/*",
-  "src/productivity_app/ui/icons/*",
+  "src/panelo/ui/qml/**/*",
+  "src/panelo/ui/fonts/*",
+  "src/panelo/ui/icons/*",
 ]
 
 [tool.pytest.ini_options]
-addopts = "-q --strict-markers --cov=productivity_app --cov-report=term-missing"
+addopts = "-q --strict-markers --cov=panelo --cov-report=term-missing"
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -52,8 +52,8 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["productivity_app"]
-exclude = ["src/productivity_app/db/migrations"]
+packages = ["panelo"]
+exclude = ["src/panelo/db/migrations"]
 
 [[tool.mypy.overrides]]
 module = ["alembic.*"]
@@ -62,11 +62,11 @@ ignore_missing_imports = true
 # The self-test steps are test scripts driving QML windows through untyped Qt objects.
 [[tool.mypy.overrides]]
 module = [
-  "productivity_app.ui.selftest.steps_core",
-  "productivity_app.ui.selftest.steps_layout",
-  "productivity_app.ui.selftest.steps_round7",
-  "productivity_app.ui.selftest.steps_views",
-  "productivity_app.ui.selftest.unit_checks",
+  "panelo.ui.selftest.steps_core",
+  "panelo.ui.selftest.steps_layout",
+  "panelo.ui.selftest.steps_round7",
+  "panelo.ui.selftest.steps_views",
+  "panelo.ui.selftest.unit_checks",
 ]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false

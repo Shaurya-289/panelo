@@ -9,8 +9,8 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import text
 
-from productivity_app.core.exceptions import InvalidStateTransitionError, ValidationError
-from productivity_app.schemas.reminders import (
+from panelo.core.exceptions import InvalidStateTransitionError, ValidationError
+from panelo.schemas.reminders import (
     CreateReminder,
     ReminderPageQuery,
     ReminderRepeat,

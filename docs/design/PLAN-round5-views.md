@@ -183,7 +183,7 @@ with a MouseArea drag) and steppers. Changes apply live and persist.
   - Close button hides to tray.
 - **HOTKEY:** "Open overlay" uses a **press-to-record** box.
   - Click it → "Press keys…" (focused, with a highlighted border).
-  - Press a combo → it is validated with `productivity_app.desktop.hotkey.parse_hotkey`
+  - Press a combo → it is validated with `panelo.desktop.hotkey.parse_hotkey`
     (≥2 modifiers + a supported key), via a Python slot on the controller.
   - It then tries to **re-register** the real global hotkey through the controller's existing
     `HotkeyManager.replace(...)` (under selftest/headless: stub it).

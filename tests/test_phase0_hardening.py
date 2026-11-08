@@ -11,20 +11,20 @@ from alembic import command
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app import bootstrap
-from productivity_app.bootstrap import (
+from panelo import bootstrap
+from panelo.bootstrap import (
     _alembic_config,
     _validate_database_integrity,
     create_application,
 )
-from productivity_app.core import logging_config
-from productivity_app.core.events import DomainEvent, InProcessEventBus
-from productivity_app.core.exceptions import DatabaseCorruptionError, DatabaseError, ValidationError
-from productivity_app.core.logging_config import _OWNED_HANDLER, configure_logging, shutdown_logging
-from productivity_app.db.engine import configure_and_verify_sqlite_pragmas
-from productivity_app.db.types import UTCDateTime, datetime_to_epoch_microseconds
-from productivity_app.db.unit_of_work import SqlAlchemyUnitOfWork
-from productivity_app.schemas.settings import SettingsPatch
+from panelo.core import logging_config
+from panelo.core.events import DomainEvent, InProcessEventBus
+from panelo.core.exceptions import DatabaseCorruptionError, DatabaseError, ValidationError
+from panelo.core.logging_config import _OWNED_HANDLER, configure_logging, shutdown_logging
+from panelo.db.engine import configure_and_verify_sqlite_pragmas
+from panelo.db.types import UTCDateTime, datetime_to_epoch_microseconds
+from panelo.db.unit_of_work import SqlAlchemyUnitOfWork
+from panelo.schemas.settings import SettingsPatch
 
 
 def test_startup_is_independent_of_current_working_directory(
@@ -140,7 +140,7 @@ def test_logging_is_idempotent_utc_and_falls_back_to_stderr(
 
 
 def _owned_stderr_handler() -> logging.Handler:
-    logger = logging.getLogger("productivity_app")
+    logger = logging.getLogger("panelo")
     handlers = [handler for handler in logger.handlers if getattr(handler, _OWNED_HANDLER, False)]
     assert len(handlers) == 1
     assert isinstance(handlers[0], logging.StreamHandler)

@@ -10,8 +10,8 @@ from alembic import command
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.bootstrap import _alembic_config
-from productivity_app.db.engine import create_sqlite_engine, sqlite_url
+from panelo.bootstrap import _alembic_config
+from panelo.db.engine import create_sqlite_engine, sqlite_url
 
 
 @pytest.fixture

@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from productivity_app.core.exceptions import StaleVersionError
-from productivity_app.schemas.notes import CreateNote, NoteQuery, UpdateNote
+from panelo.core.exceptions import StaleVersionError
+from panelo.schemas.notes import CreateNote, NoteQuery, UpdateNote
 
 COLORS = ("none", "plum", "rose", "amber", "moss", "teal", "slate", "sand")
 

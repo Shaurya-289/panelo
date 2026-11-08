@@ -6,12 +6,12 @@ from datetime import timedelta
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from productivity_app.bootstrap import create_application
-from productivity_app.core.events import DomainEvent, InProcessEventBus
-from productivity_app.core.exceptions import DuplicateNameError, NotFoundError
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.schemas.tasks import CreateTask
-from productivity_app.schemas.timers import (
+from panelo.bootstrap import create_application
+from panelo.core.events import DomainEvent, InProcessEventBus
+from panelo.core.exceptions import DuplicateNameError, NotFoundError
+from panelo.db.engine import create_sqlite_engine
+from panelo.schemas.tasks import CreateTask
+from panelo.schemas.timers import (
     CreateTimer,
     CreateTimerPreset,
     MoveTimerPreset,
@@ -21,7 +21,7 @@ from productivity_app.schemas.timers import (
     UpdateTimer,
     UpdateTimerPreset,
 )
-from productivity_app.services.timers import TimerService
+from panelo.services.timers import TimerService
 
 
 class SequenceIds:

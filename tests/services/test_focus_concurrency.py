@@ -4,20 +4,20 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
 
-from productivity_app.core.events import DomainEvent
-from productivity_app.core.exceptions import (
+from panelo.core.events import DomainEvent
+from panelo.core.exceptions import (
     ConflictError,
     InvalidStateTransitionError,
     NotFoundError,
     StaleVersionError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.schemas.focus import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.schemas.focus import (
     AdvanceFocusSequence,
     CancelFocusSequence,
     CreateFocusSequence,
 )
-from productivity_app.schemas.tasks import CreateTask
+from panelo.schemas.tasks import CreateTask
 
 
 def _rows(app_config, sql: str, params: dict[str, object] | None = None) -> list[tuple[object, ...]]:

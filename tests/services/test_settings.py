@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from productivity_app.core.exceptions import StaleVersionError
-from productivity_app.schemas.settings import FilesViewMode, NotificationStyle, SettingsPatch, Theme
+from panelo.core.exceptions import StaleVersionError
+from panelo.schemas.settings import FilesViewMode, NotificationStyle, SettingsPatch, Theme
 
 
 def test_settings_defaults_are_created_and_survive_reopen(application, app_config, clock) -> None:
@@ -14,7 +14,7 @@ def test_settings_defaults_are_created_and_survive_reopen(application, app_confi
     assert settings.default_timer_duration_ms == 1_500_000
     application.close()
 
-    from productivity_app.bootstrap import create_application
+    from panelo.bootstrap import create_application
 
     restarted = create_application(app_config, clock)
     try:
@@ -168,7 +168,7 @@ def test_reset_restores_the_defaults_but_keeps_identity_and_library_location(app
 def test_corrupt_new_setting_is_reported_as_database_corruption(application) -> None:
     from sqlalchemy import text
 
-    from productivity_app.core.exceptions import DatabaseCorruptionError
+    from panelo.core.exceptions import DatabaseCorruptionError
 
     with application.engine.begin() as connection:
         connection.execute(text("PRAGMA ignore_check_constraints=ON"))

@@ -10,16 +10,16 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from productivity_app.core.events import InProcessEventBus
-from productivity_app.core.exceptions import (
+from panelo.core.events import InProcessEventBus
+from panelo.core.exceptions import (
     ConflictError,
     InvalidStateTransitionError,
     NotFoundError,
     StaleVersionError,
     ValidationError,
 )
-from productivity_app.db.engine import create_sqlite_engine
-from productivity_app.schemas.tasks import (
+from panelo.db.engine import create_sqlite_engine
+from panelo.schemas.tasks import (
     CreateTask,
     TaskCalendarQuery,
     TaskPageQuery,
@@ -27,7 +27,7 @@ from productivity_app.schemas.tasks import (
     TaskSearchQuery,
     UpdateTask,
 )
-from productivity_app.services.tasks import _translate_task_integrity_error
+from panelo.services.tasks import _translate_task_integrity_error
 
 _TASK_EVENT_TYPES = (
     "TASK_CREATED",

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from platformdirs import user_data_dir
 
-from productivity_app.files.library import (
+from panelo.files.library import (
     FileLibrary,
     default_library_root,
     human_size,
@@ -82,7 +82,7 @@ def test_the_root_is_created_and_resolved(tmp_path: Path, trash: FakeTrash) -> N
 def test_the_default_root_is_files_inside_the_application_data_folder() -> None:
     root = default_library_root()
     assert root.name == "Files"
-    assert root.parent == Path(user_data_dir("ProductivityApp", "ProductivityApp"))
+    assert root.parent == Path(user_data_dir("Panelo", "Panelo"))
     assert library_root("") == root == library_root("   ")
     assert library_root(" D:/Notes/Files ") == Path("D:/Notes/Files")
 

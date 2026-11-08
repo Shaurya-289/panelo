@@ -10,12 +10,20 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import time
+import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO
 
-from PySide6.QtCore import QCoreApplication, QTimer
+from PySide6.QtCore import (
+    QCoreApplication,
+    QMessageLogContext,
+    QTimer,
+    QtMsgType,
+    qInstallMessageHandler,
+)
 from PySide6.QtWidgets import QApplication
 
 from panelo.ui.selftest import (
@@ -233,7 +241,70 @@ def run_selftest(env: SelfTestEnv, qt_app: QApplication) -> None:
     run(0)
 
 
+# -- Where the report goes -------------------------------------------------------------------
+
+SELFTEST_OUTPUT_ENV = "PANELO_SELFTEST_OUTPUT"
+DEFAULT_OUTPUT_NAME = "panelo-selftest.log"
+
+# The installed Qt message handler: held here so it is not garbage-collected while installed.
+_qt_handler: Callable[[QtMsgType, QMessageLogContext, str], None] | None = None
+
+
+def _redirect_output() -> TextIO | None:
+    """Send the report (everything printed) and Qt's messages to a file, when needed.
+
+    The windowed (frozen) build has no console: ``sys.stdout`` is None and the PASS/FAIL lines
+    would vanish.  Then, or whenever ``PANELO_SELFTEST_OUTPUT`` names a file, the output goes to
+    that file (default ``%TEMP%\\panelo-selftest.log``) and Qt's messages are written to it as
+    ``qt: <message>`` lines.  Otherwise nothing changes (returns None): Qt keeps logging to the
+    console's stderr (``QT_FORCE_STDERR_LOGGING``, set in ``desktop/main.py``).
+    """
+    global _qt_handler
+    target = os.environ.get(SELFTEST_OUTPUT_ENV)
+    if not target and sys.stdout is not None:
+        return None
+    path = Path(target) if target else Path(tempfile.gettempdir()) / DEFAULT_OUTPUT_NAME
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = path.open("w", encoding="utf-8", errors="replace", buffering=1)
+    except OSError as exc:
+        if sys.stderr is not None:
+            print(f"selftest: cannot write {path}: {exc}", file=sys.stderr)
+        return None
+    sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+
+    def handler(_mode: QtMsgType, _context: QMessageLogContext, message: str) -> None:
+        stream.write(f"qt: {message}\n")
+
+    _qt_handler = handler
+    qInstallMessageHandler(handler)
+    return stream
+
+
 def run_dev_command(options: DesktopOptions, qt_app: QApplication) -> int:
+    """``--selftest`` / ``--screenshot``, with the report redirected to a file when needed
+    (see ``_redirect_output``).  The exit code is the same either way."""
+    global _qt_handler
+    saved = sys.stdout, sys.stderr
+    stream = _redirect_output()
+    try:
+        return _run_dev_command(options, qt_app)
+    except Exception:
+        if stream is None:
+            raise
+        traceback.print_exc(file=stream)
+        return 1
+    finally:
+        if stream is not None:
+            qInstallMessageHandler(None)
+            _qt_handler = None
+            sys.stdout, sys.stderr = saved
+            stream.close()
+
+
+def _run_dev_command(options: DesktopOptions, qt_app: QApplication) -> int:
     """``--selftest`` / ``--screenshot``: always on a temporary seeded copy of everything."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

@@ -51,7 +51,9 @@ _MIGRATIONS_DIRECTORY = Path(__file__).resolve().parent / "db" / "migrations"
 def _alembic_config(database_url: str, busy_timeout_ms: int) -> Config:
     config = Config()
     config.set_main_option("script_location", str(_MIGRATIONS_DIRECTORY))
-    config.set_main_option("sqlalchemy.url", database_url)
+    # ConfigParser treats "%" as interpolation; SQLAlchemy 2.1 percent-encodes
+    # the path in str(url) (e.g. "C%3A/..."), so escape it.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     config.set_main_option("panelo.busy_timeout_ms", str(busy_timeout_ms))
     return config
 

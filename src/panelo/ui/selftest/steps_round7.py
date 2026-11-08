@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QWindow
+from PySide6.QtGui import QCursor, QWindow
 from PySide6.QtTest import QTest
 
 from panelo.ui.bridge.system import clock_is_12h
@@ -365,6 +365,10 @@ def search_steps(env: Any) -> list[Step]:
     def reset_window() -> None:
         full.setWidth(1320)
         full.setHeight(820)
+        # Park the real mouse pointer off the window: hovering a result row
+        # selects it, which would break the keyboard-navigation checks.
+        geometry = full.geometry()
+        QCursor.setPos(geometry.right() + 40, geometry.bottom() + 40)
 
     def narrow_window() -> None:
         full.setWidth(860)

@@ -16,3 +16,6 @@ __pycache__/
 .shots/
 .scratch/
 .coverage
+.coverage.*
+/build/
+/dist/

@@ -34,6 +34,36 @@ The UI has two modes:
 
 <sub>Screenshots show sample data from the built-in self-test.</sub>
 
+## Download and install
+
+1. **Download the installer.** Go to the
+   [latest release](https://github.com/Shaurya-289/panelo/releases/latest) and download
+   `Panelo-Setup-1.0.0.exe`.
+   The repository is private, so you must be signed in to GitHub with an account that has access.
+   With the [GitHub CLI](https://cli.github.com/) you can also run:
+   ```powershell
+   gh release download v1.0.0 -R Shaurya-289/panelo
+   ```
+   (`SHA256SUMS.txt` in the release lists the checksum of each file.)
+2. **Run it.** If Windows shows *"Windows protected your PC"* (the installer is not signed), click
+   **More info**, then **Run anyway**.
+3. **Click through the setup.** It installs just for you, with no admin prompt, into
+   `%LOCALAPPDATA%\Programs\Panelo`. It adds a Start Menu entry and, unless you untick it, a
+   desktop shortcut.
+4. **Start Panelo.** Leave *Launch Panelo* ticked on the last page, or open it from the Start Menu.
+
+**Portable zip instead:** download `Panelo-1.0.0-portable.zip`, extract it anywhere and run
+`Panelo\Panelo.exe`. Nothing is installed; it uses the same data folder as the installed app.
+
+**Upgrading:** run the newer installer. It closes Panelo if it is running and keeps your data.
+
+**Uninstalling:** open **Settings > Apps > Installed apps**, find **Panelo** and choose
+**Uninstall**. This also removes the *Start with Windows* entry. Your data in
+`%LOCALAPPDATA%\Panelo\Panelo` is kept; delete that folder if you want to erase it too.
+
+**Requirements:** 64-bit Windows 10 (version 1809 or newer) or Windows 11. Windows 11 is
+recommended, because the icons use the Segoe Fluent Icons font.
+
 ## Status
 
 | Part | Status |
@@ -41,21 +71,28 @@ The UI has two modes:
 | Backend (database, services, migrations) | Done, tested |
 | New Qt Quick UI | Done |
 | UI connected to the backend | Done (bridge, scheduler, shell, `--selftest`) |
-| Packaging / installer | Not started |
+| Packaging / installer | Done (v1.0.0: Windows installer and portable zip) |
 
 ## Requirements
+
+These are only needed to run Panelo from source or build the installer (the installer above
+needs nothing else).
 
 - Windows 10/11
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 - SQLite built with FTS5 (checked at startup)
 
-## Getting started
+## Running from source
 
 1. **Install [uv](https://docs.astral.sh/uv/)** (it also installs the right Python for you).
    In PowerShell:
    ```powershell
    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+   Or, with winget:
+   ```powershell
+   winget install --id astral-sh.uv -e
    ```
    Then close and reopen PowerShell.
 2. **Download the code:**
@@ -110,6 +147,45 @@ it copies any existing data from `%LOCALAPPDATA%\ProductivityApp\ProductivityApp
 (the old folder is left in place). The Files library defaults to a
 `Files` folder in the data directory and can be moved in Settings.
 
+## Building the installer
+
+The packaging files are in [`packaging/`](packaging/): `panelo.spec` (PyInstaller),
+`panelo.iss` (Inno Setup), `build.ps1` (the build script) and `panelo_launcher.py` (the exe's
+entry point).
+
+1. **Install uv and Inno Setup 6:**
+   ```powershell
+   winget install --id astral-sh.uv -e
+   winget install --id JRSoftware.InnoSetup -e
+   ```
+   Then close and reopen PowerShell.
+2. **Install the dependencies** (in the `panelo` folder):
+   ```powershell
+   uv sync
+   ```
+3. **Build:**
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Selftest
+   ```
+   It runs the lint and tests, builds the app, runs the self-test on the built exe, and writes:
+   - `dist\Panelo\` (the app folder)
+   - `dist\Panelo-<version>-portable.zip`
+   - `dist\Panelo-Setup-<version>.exe`
+   - `dist\SHA256SUMS.txt`
+
+   Other switches: `-SkipChecks` (skip lint and tests) and `-SkipInstaller` (no Inno Setup step).
+
+The version comes from `pyproject.toml`. Keep `__version__` in `src/panelo/__init__.py` the same
+(a test checks this).
+
+To run the self-test on the built exe by hand:
+
+```powershell
+$env:PANELO_SELFTEST_OUTPUT="$PWD\selftest.log"; (Start-Process dist\Panelo\Panelo.exe --selftest -Wait -PassThru).ExitCode
+```
+
+Without `PANELO_SELFTEST_OUTPUT`, the report goes to `%TEMP%\panelo-selftest.log`.
+
 ## Development and testing
 
 ```powershell
@@ -122,7 +198,8 @@ $env:QT_FORCE_STDERR_LOGGING = "1"; uv run python -m panelo.desktop --selftest
 
 Tests use temporary databases and never touch the real data directory, registry Run key or
 Recycle Bin. `--selftest` takes a few minutes and should finish with every check passing and no
-QML warnings on stderr.
+QML warnings on stderr. Set `PANELO_SELFTEST_OUTPUT` to a file path to write the self-test report
+to that file instead of the console.
 
 ## Layout (`src/panelo/`)
 

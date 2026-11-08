@@ -33,6 +33,7 @@ packages = ["src/productivity_app"]
 artifacts = [
   "src/productivity_app/ui/qml/**/*",
   "src/productivity_app/ui/fonts/*",
+  "src/productivity_app/ui/icons/*",
 ]
 
 [tool.pytest.ini_options]

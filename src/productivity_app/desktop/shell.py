@@ -31,7 +31,6 @@ from PySide6.QtGui import (
     QImage,
     QLinearGradient,
     QPainter,
-    QPixmap,
     QRadialGradient,
     QWindow,
 )
@@ -173,19 +172,12 @@ def wallpaper_image(width: int, height: int, *, fake: bool) -> QImage:
     return fake_backdrop(width, height)
 
 
+APP_ICON_PATH = Path(__file__).resolve().parent.parent / "ui" / "icons" / "app-icon.svg"
+
+
 def make_tray_icon() -> QIcon:
-    """White rounded square on a dark tile."""
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#17181c"))
-    painter.drawRoundedRect(2, 2, 60, 60, 14, 14)
-    painter.setBrush(QColor("#ffffff"))
-    painter.drawRoundedRect(18, 18, 28, 28, 7, 7)
-    painter.end()
-    return QIcon(pixmap)
+    """The app icon (also used for the windows and the taskbar)."""
+    return QIcon(str(APP_ICON_PATH))
 
 
 def flatten_png(path: str, background: str = "#202125") -> None:

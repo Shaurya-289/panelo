@@ -8,6 +8,8 @@ time); ``--startup`` (what Windows runs at sign-in) starts hidden in the tray.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import ctypes
 import logging
 import os
 import sys
@@ -29,6 +31,7 @@ from productivity_app.desktop.instance import (
     activation_server_name,
     request_activation,
 )
+from productivity_app.desktop.shell import make_tray_icon
 from productivity_app.desktop.startup import default_launcher
 from productivity_app.windows.hotkeys import HotkeyBackend
 from productivity_app.windows.mutex import (
@@ -98,6 +101,11 @@ def create_qt_application(argv: Sequence[str]) -> QApplication:
     app = QApplication(list(argv))
     app.setOrganizationName("ProductivityApp")
     app.setApplicationName("ProductivityApp")
+    app.setWindowIcon(make_tray_icon())
+    if sys.platform == "win32":
+        # Own taskbar identity, so Windows shows our icon instead of python.exe's.
+        with contextlib.suppress(Exception):
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ProductivityApp.Desktop")
     return app
 
 
